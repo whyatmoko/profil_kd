@@ -120,7 +120,7 @@ h2 {
 
 .upload-box {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) auto;
+  grid-template-columns: minmax(280px, 1fr) auto auto;
   gap: 8px;
   width: min(520px, 100%);
 }
@@ -136,6 +136,23 @@ h2 {
 
 .summary-actions {
   grid-template-columns: 1fr;
+}
+
+.icon-button {
+  min-width: 42px;
+  width: 42px;
+  padding: 5px 6px;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.icon-button.danger {
+  color: var(--danger);
+}
+
+.icon-button.danger:hover {
+  border-color: rgba(180, 35, 24, 0.45);
+  background: #fff5f5;
 }
 
 .layout {

@@ -3,6 +3,7 @@ const profilerConfig = {
   subject: "PKBU",
   emptySourceText: "Upload data PKBU untuk mulai profiling.",
   combineContactCompleteness: false,
+  lockedKanwil: "905",
   ...(window.PROFILER_CONFIG ?? {}),
 };
 
@@ -319,6 +320,10 @@ function qualityStatus(value) {
   return String(value ?? "").trim().toUpperCase();
 }
 
+function isAllowedKanwilValue(value) {
+  return !profilerConfig.lockedKanwil || String(value ?? "").trim() === profilerConfig.lockedKanwil;
+}
+
 function isNoGoodStatus(status) {
   return Boolean(status) && status !== "GOOD";
 }
@@ -368,6 +373,8 @@ function convertQualityRows(headers, rows) {
   const converted = [];
 
   for (const row of rows) {
+    if (!isAllowedKanwilValue(row[kanwilCol])) continue;
+
     if (contactPair) {
       const emailStatus = qualityStatus(row[contactPair.emailColumn]);
       const phoneStatus = qualityStatus(row[contactPair.phoneColumn]);
@@ -432,7 +439,7 @@ function convertQualityRows(headers, rows) {
       elemen: normalizedIssueColumns.elemen,
       amount: normalizedIssueColumns.amount,
     },
-    sourceRows: rows.length,
+    sourceRows: rows.filter((row) => isAllowedKanwilValue(row[kanwilCol])).length,
     issueColumns: issueColumns.length,
   };
 }
@@ -665,12 +672,23 @@ function renderFilters() {
   const elemens = uniqueValues(state.rows, state.mapping.elemen);
   const categoricalColumns = state.columns.filter((column) => column !== state.mapping.amount);
 
-  if (state.mapping.kanwil && !kanwils.includes(state.kanwil)) state.kanwil = kanwils.includes("905") ? "905" : "ALL";
+  if (profilerConfig.lockedKanwil) {
+    state.kanwil = profilerConfig.lockedKanwil;
+  } else if (state.mapping.kanwil && !kanwils.includes(state.kanwil)) {
+    state.kanwil = kanwils.includes("905") ? "905" : "ALL";
+  }
   if (state.mapping.cabang && !cabangs.includes(state.cabang)) state.cabang = "ALL";
   if (state.mapping.elemen && !elemens.includes(state.elemen)) state.elemen = "ALL";
   if (!categoricalColumns.includes(state.extraColumn)) state.extraColumn = "NONE";
 
-  setOptions(els.kanwilFilter, [{ value: "ALL", label: "Semua" }, ...kanwils.map((value) => ({ value, label: value }))], state.kanwil);
+  setOptions(
+    els.kanwilFilter,
+    profilerConfig.lockedKanwil
+      ? [{ value: profilerConfig.lockedKanwil, label: `${profilerConfig.lockedKanwil} - Kanwil Jateng DIY` }]
+      : [{ value: "ALL", label: "Semua" }, ...kanwils.map((value) => ({ value, label: value }))],
+    state.kanwil,
+  );
+  els.kanwilFilter.disabled = Boolean(profilerConfig.lockedKanwil);
   setOptions(els.cabangFilter, [{ value: "ALL", label: "Semua Cabang" }, ...cabangs.map((value) => ({ value, label: officeLabel(value) }))], state.cabang);
   setOptions(els.elemenFilter, [{ value: "ALL", label: "Semua Elemen" }, ...elemens.map((value) => ({ value, label: value }))], state.elemen);
   setOptions(
@@ -956,7 +974,8 @@ function renderEmpty() {
   if (els.downloadFiltered) els.downloadFiltered.disabled = true;
   renderUploadMeta();
   setOptions(els.previewElementFilter, [{ value: "ALL", label: "Semua Elemen Preview" }], "ALL");
-  setOptions(els.kanwilFilter, [{ value: "905", label: "905" }], "905");
+  setOptions(els.kanwilFilter, [{ value: "905", label: "905 - Kanwil Jateng DIY" }], "905");
+  els.kanwilFilter.disabled = true;
   setOptions(els.cabangFilter, [{ value: "ALL", label: "Semua Cabang" }], "ALL");
   setOptions(els.elemenFilter, [{ value: "ALL", label: "Semua Elemen" }], "ALL");
   setOptions(els.extraColumnFilter, [{ value: "NONE", label: "Tidak ada" }], "NONE");
@@ -1100,7 +1119,7 @@ async function restoreSavedData() {
     state.fileName = saved.fileName ?? "data tersimpan";
     state.valueMode = saved.valueMode ?? "currency";
     state.sourceRowCount = saved.sourceRowCount ?? saved.rows.length;
-    state.kanwil = state.mapping.kanwil && uniqueValues(state.rows, state.mapping.kanwil).includes("905") ? "905" : "ALL";
+    state.kanwil = profilerConfig.lockedKanwil ?? (state.mapping.kanwil && uniqueValues(state.rows, state.mapping.kanwil).includes("905") ? "905" : "ALL");
     state.cabang = "ALL";
     state.elemen = "ALL";
     state.extraColumn = "NONE";
@@ -1187,20 +1206,26 @@ async function handleFiles(files) {
     const first = loadedFiles[0];
     const headers = first.headers;
     const mapping = first.mapping;
-    const rows = loadedFiles.flatMap((item) => item.rows);
+    let rows = loadedFiles.flatMap((item) => item.rows);
     const qualityData = loadedFiles.every((item) => item.qualityData)
       ? {
           sourceRows: loadedFiles.reduce((sum, item) => sum + item.qualityData.sourceRows, 0),
           issueColumns: Math.max(...loadedFiles.map((item) => item.qualityData.issueColumns)),
         }
       : null;
+    if (profilerConfig.lockedKanwil && mapping.kanwil) {
+      rows = rows.filter((row) => isAllowedKanwilValue(row[mapping.kanwil]));
+    }
+    if (!rows.length) {
+      throw new Error(`File tidak memiliki data Kanwil ${profilerConfig.lockedKanwil ?? "yang diizinkan"}.`);
+    }
     state.rows = rows;
     state.columns = headers;
     state.mapping = mapping;
     state.fileName = loadedFiles.map((item) => item.file.name).join(" + ");
     state.valueMode = qualityData ? "count" : "currency";
     state.sourceRowCount = qualityData?.sourceRows ?? rows.length;
-    state.kanwil = mapping.kanwil && uniqueValues(rows, mapping.kanwil).includes("905") ? "905" : "ALL";
+    state.kanwil = profilerConfig.lockedKanwil ?? (mapping.kanwil && uniqueValues(rows, mapping.kanwil).includes("905") ? "905" : "ALL");
     state.cabang = "ALL";
     state.elemen = "ALL";
     state.extraColumn = "NONE";
@@ -1220,7 +1245,7 @@ async function handleFiles(files) {
 }
 
 function resetFilters() {
-  state.kanwil = state.mapping.kanwil && uniqueValues(state.rows, state.mapping.kanwil).includes("905") ? "905" : "ALL";
+  state.kanwil = profilerConfig.lockedKanwil ?? (state.mapping.kanwil && uniqueValues(state.rows, state.mapping.kanwil).includes("905") ? "905" : "ALL");
   state.cabang = "ALL";
   state.elemen = "ALL";
   state.extraColumn = "NONE";
