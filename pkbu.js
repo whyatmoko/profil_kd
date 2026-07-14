@@ -62,6 +62,7 @@ const els = {
   nppPivotPanel: document.querySelector("#nppPivotPanel"),
   nppPivotSubtitle: document.querySelector("#nppPivotSubtitle"),
   nppSearchInput: document.querySelector("#nppSearchInput"),
+  downloadNppPivot: document.querySelector("#downloadNppPivot"),
   filteredInsights: document.querySelector("#filteredInsights"),
   filteredSubtitle: document.querySelector("#filteredSubtitle"),
   tableSubtitle: document.querySelector("#tableSubtitle"),
@@ -619,7 +620,7 @@ function insightItems(rows, scopeLabel) {
 
   return [
     {
-      title: "TOP 3 Temuan No Good",
+      title: "TOP 3 Temuan NOT GOOD",
       body: topListText(elementGroups.slice(0, 3)),
     },
     {
@@ -631,13 +632,13 @@ function insightItems(rows, scopeLabel) {
     {
       title: "Elemen dominan",
       body: topElement
-        ? `${topElement.name} adalah elemen no good terbanyak dengan ${formatMeasure(topElement.total)} atau ${fmtPct.format(total ? topElement.total / total : 0)} dari total.`
+        ? `${topElement.name} adalah elemen NOT GOOD terbanyak dengan ${formatMeasure(topElement.total)} atau ${fmtPct.format(total ? topElement.total / total : 0)} dari total.`
         : "Kolom elemen belum terdeteksi.",
     },
     {
       title: "Top 3 Cabang dan Elemen Terbesar",
       body: topBranchDetails.length
-        ? `${topBranchDetails.map((item) => `${officeLabel(item.name)}: ${item.topElement} (${formatMeasure(item.topElementTotal)})`).join("\n")}\nTotal top ${topBranchDetails.length} cabang = ${fmtPct.format(total ? concentration / total : 0)} dari seluruh no good.`
+        ? `${topBranchDetails.map((item) => `${officeLabel(item.name)}: ${item.topElement} (${formatMeasure(item.topElementTotal)})`).join("\n")}\nTotal top ${topBranchDetails.length} cabang = ${fmtPct.format(total ? concentration / total : 0)} dari seluruh NOT GOOD.`
         : "Konsentrasi cabang belum bisa dihitung.",
     },
   ];
@@ -832,6 +833,74 @@ function downloadFilteredCsv() {
   URL.revokeObjectURL(url);
 }
 
+function buildNppPivotData(rows) {
+  const branchColumn = state.mapping.cabang;
+  const elementColumn = state.mapping.elemen;
+  const amountColumn = state.mapping.amount;
+  const nppColumn = normalizedIssueColumns.npp;
+  const segmentColumn = normalizedIssueColumns.segment;
+
+  if (!branchColumn || !elementColumn || !nppColumn || !rows.length) {
+    return { elementNames: [], items: [] };
+  }
+
+  const elementGroups = groupBySum(rows, elementColumn);
+  const elementNames = elementGroups.map((item) => item.name);
+  const groups = new Map();
+
+  for (const row of rows) {
+    const branch = String(row[branchColumn] ?? "").trim() || "-";
+    const segment = String(row[segmentColumn] ?? "").trim() || "-";
+    const npp = String(row[nppColumn] ?? "").trim() || "-";
+    const element = String(row[elementColumn] ?? "").trim() || "Kosong";
+    const key = `${branch}|${segment}|${npp}`;
+    const current = groups.get(key) ?? { branch, segment, npp, total: 0, elements: new Map() };
+    const amount = parseNumber(row[amountColumn]);
+    current.total += amount;
+    current.elements.set(element, (current.elements.get(element) ?? 0) + amount);
+    groups.set(key, current);
+  }
+
+  const search = state.nppSearch;
+  const items = [...groups.values()]
+    .filter((item) => !search || item.npp.toLowerCase().includes(search))
+    .sort((a, b) => b.total - a.total || a.branch.localeCompare(b.branch, "id", { numeric: true }) || a.npp.localeCompare(b.npp, "id", { numeric: true }));
+
+  return { elementNames, items };
+}
+
+function downloadNppPivotCsv() {
+  const { elementNames, items } = buildNppPivotData(filteredRows());
+  if (!items.length) {
+    showToast("Tidak ada data pivot NPP untuk didownload.");
+    return;
+  }
+
+  const columns = ["Kode Cabang", "Segmen", "NPP", ...elementNames];
+  const csv = [
+    columns.map(csvEscape).join(","),
+    ...items.map((item) => [
+      item.branch,
+      item.segment,
+      item.npp,
+      ...elementNames.map((element) => item.elements.get(element) ?? 0),
+    ].map(csvEscape).join(",")),
+  ].join("\r\n");
+
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const branch = state.cabang === "ALL" ? "semua-cabang" : state.cabang.toLowerCase();
+  const segment = state.segment === "ALL" ? "semua-segmen" : state.segment.toLowerCase();
+  const subject = profilerConfig.subject.toLowerCase().replace(/\s+/g, "-");
+  anchor.href = url;
+  anchor.download = `${subject}-${branch}-${segment}-pivot-npp.csv`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function lockFiltersForPrint() {
   printLockedControls = [...document.querySelectorAll(".toolbar select, .toolbar button, .panel-head select, .panel-head input, .panel-head button, .pagination button")]
     .map((control) => ({ control, disabled: control.disabled }));
@@ -901,39 +970,14 @@ function renderPrimaryQuality(rows) {
 function renderNppPivotPanel(rows) {
   if (!els.nppPivotPanel) return;
 
-  const branchColumn = state.mapping.cabang;
-  const elementColumn = state.mapping.elemen;
-  const amountColumn = state.mapping.amount;
-  const nppColumn = normalizedIssueColumns.npp;
-  const segmentColumn = normalizedIssueColumns.segment;
+  const { elementNames, items } = buildNppPivotData(rows);
 
-  if (!branchColumn || !elementColumn || !nppColumn || !rows.length) {
+  if (!items.length && !state.nppSearch) {
     els.nppPivotPanel.innerHTML = `<p class="empty">Tidak ada data NPP untuk filter aktif.</p>`;
-    if (els.nppPivotSubtitle) els.nppPivotSubtitle.textContent = "Beban elemen no good per NPP.";
+    if (els.nppPivotSubtitle) els.nppPivotSubtitle.textContent = "Beban elemen NOT GOOD per NPP.";
+    if (els.downloadNppPivot) els.downloadNppPivot.disabled = true;
     return;
   }
-
-  const elementGroups = groupBySum(rows, elementColumn);
-  const elementNames = elementGroups.map((item) => item.name);
-  const groups = new Map();
-
-  for (const row of rows) {
-    const branch = String(row[branchColumn] ?? "").trim() || "-";
-    const segment = String(row[segmentColumn] ?? "").trim() || "-";
-    const npp = String(row[nppColumn] ?? "").trim() || "-";
-    const element = String(row[elementColumn] ?? "").trim() || "Kosong";
-    const key = `${branch}|${segment}|${npp}`;
-    const current = groups.get(key) ?? { branch, segment, npp, total: 0, elements: new Map() };
-    const amount = parseNumber(row[amountColumn]);
-    current.total += amount;
-    current.elements.set(element, (current.elements.get(element) ?? 0) + amount);
-    groups.set(key, current);
-  }
-
-  const search = state.nppSearch;
-  const items = [...groups.values()]
-    .filter((item) => !search || item.npp.toLowerCase().includes(search))
-    .sort((a, b) => b.total - a.total || a.branch.localeCompare(b.branch, "id", { numeric: true }) || a.npp.localeCompare(b.npp, "id", { numeric: true }));
 
   const totalPages = Math.max(1, Math.ceil(items.length / state.nppPageSize));
   if (state.nppPage > totalPages) state.nppPage = totalPages;
@@ -950,8 +994,11 @@ function renderNppPivotPanel(rows) {
 
   if (!visible.length) {
     els.nppPivotPanel.innerHTML = `<p class="empty">Tidak ada NPP yang cocok dengan pencarian.</p>`;
+    if (els.downloadNppPivot) els.downloadNppPivot.disabled = true;
     return;
   }
+
+  if (els.downloadNppPivot) els.downloadNppPivot.disabled = false;
 
   els.nppPivotPanel.innerHTML = `
     <div class="table-wrap npp-pivot-wrap">
@@ -1082,7 +1129,8 @@ function renderEmpty() {
   if (els.pembinaPanel) els.pembinaPanel.innerHTML = `<p class="empty">Belum ada data pembina.</p>`;
   if (els.pembinaSubtitle) els.pembinaSubtitle.textContent = "Pembina dengan total elemen PKBU invalid terbanyak.";
   if (els.nppPivotPanel) els.nppPivotPanel.innerHTML = `<p class="empty">Belum ada data NPP.</p>`;
-  if (els.nppPivotSubtitle) els.nppPivotSubtitle.textContent = "Beban elemen no good per NPP.";
+  if (els.nppPivotSubtitle) els.nppPivotSubtitle.textContent = "Beban elemen NOT GOOD per NPP.";
+  if (els.downloadNppPivot) els.downloadNppPivot.disabled = true;
   els.filteredInsights.innerHTML = `<p class="empty">Belum ada data.</p>`;
   els.previewHead.innerHTML = "";
   els.previewBody.innerHTML = "";
@@ -1489,6 +1537,7 @@ function bindEvents() {
     render();
   });
   els.downloadFiltered?.addEventListener("click", downloadFilteredCsv);
+  els.downloadNppPivot?.addEventListener("click", downloadNppPivotCsv);
   els.pembinaSearchInput?.addEventListener("input", (event) => {
     state.pembinaSearch = event.target.value.trim().toLowerCase();
     state.pembinaPage = 1;
