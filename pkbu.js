@@ -30,9 +30,25 @@ const state = {
   fileName: "",
   valueMode: "currency",
   sourceRowCount: 0,
+  pkbuBurdenMode: profilerConfig.subject === "PKBU" && localStorage.getItem(`${profilerConfig.storageKey}.pkbuBurdenMode`) === "1",
 };
 
 const STORAGE_KEY = profilerConfig.storageKey;
+
+function localDateKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function isStoredDataExpired(saved) {
+  if (!saved?.savedAt) return true;
+  return localDateKey(saved.savedAt) !== localDateKey();
+}
 
 const els = {
   fileInput: document.querySelector("#fileInput"),
@@ -40,6 +56,7 @@ const els = {
   downloadPdf: document.querySelector("#downloadPdf"),
   sourceNote: document.querySelector("#sourceNote"),
   uploadMeta: document.querySelector("#uploadMeta"),
+  pkbuBurdenMode: document.querySelector("#pkbuBurdenMode"),
   kanwilFilter: document.querySelector("#kanwilFilter"),
   cabangFilter: document.querySelector("#cabangFilter"),
   segmentFilter: document.querySelector("#segmentFilter"),
@@ -159,6 +176,7 @@ const normalizedIssueColumns = {
   npp: "NPP",
   kodeTk: "Kode TK",
   kpj: "KPJ",
+  nik: "NIK / Nomor Identitas",
   pembina: "Pembina",
   perusahaan: "Nama Perusahaan",
   tanggal: "Tanggal Proses",
@@ -316,6 +334,26 @@ function qualityIssueColumns(headers) {
   return headers.filter(isValidationColumn);
 }
 
+const pkbuBurdenColumnLabels = new Map([
+  ["JML_INFO_ALAMAT", "INFO ALAMAT"],
+  ["JML_NAMA_HP_PIC", "NAMA HP PIC"],
+  ["JML_NAMA_ALAMAT_PEMILIK", "NAMA ALAMAT PEMILIK"],
+  ["JML_ASET_OMSET", "ASET OMSET"],
+]);
+
+function pkbuBurdenIssueColumns(headers) {
+  if (profilerConfig.subject !== "PKBU" || !state.pkbuBurdenMode) return [];
+  return [...pkbuBurdenColumnLabels.keys()].filter((column) => headers.includes(column));
+}
+
+function pkbuBurdenElementLabel(header) {
+  return pkbuBurdenColumnLabels.get(header) ?? String(header).replace(/^JML_/i, "").replace(/_/g, " ");
+}
+
+function isBurdenFlag(value) {
+  return parseNumber(value) === 1;
+}
+
 function qualityElementLabel(header) {
   return String(header)
     .replace(/_QUALITY$/i, "")
@@ -374,7 +412,8 @@ function qualityValueColumn(headers, validationColumn) {
 }
 
 function convertQualityRows(headers, rows) {
-  const issueColumns = qualityIssueColumns(headers);
+  const burdenColumns = pkbuBurdenIssueColumns(headers);
+  const issueColumns = burdenColumns.length ? burdenColumns : qualityIssueColumns(headers);
   if (!issueColumns.length) return null;
 
   const kanwilCol = findColumn(headers, "kanwil") || "KODE_WILAYAH";
@@ -384,6 +423,33 @@ function convertQualityRows(headers, rows) {
 
   for (const row of rows) {
     if (!isAllowedKanwilValue(row[kanwilCol])) continue;
+
+    if (burdenColumns.length) {
+      for (const column of burdenColumns) {
+        if (!isBurdenFlag(row[column])) continue;
+        const elementLabel = pkbuBurdenElementLabel(column);
+        converted.push({
+          [normalizedIssueColumns.kanwil]: row[kanwilCol] ?? "",
+          [normalizedIssueColumns.cabang]: row[cabangCol] ?? "",
+          [normalizedIssueColumns.officeName]: officeLookup.get(String(row[cabangCol] ?? "").trim())?.name ?? "",
+          [normalizedIssueColumns.category]: row.KATEGORI ?? "",
+          [normalizedIssueColumns.segment]: row.KODE_SEGMEN ?? "",
+          [normalizedIssueColumns.elemen]: elementLabel,
+          [normalizedIssueColumns.amount]: 1,
+          [normalizedIssueColumns.status]: "BEBAN",
+          [normalizedIssueColumns.indication]: `${elementLabel} - ${column}=1`,
+          [normalizedIssueColumns.value]: row[column] ?? "",
+          [normalizedIssueColumns.npp]: row.NPP ?? "",
+          [normalizedIssueColumns.kodeTk]: row.KODE_TK ?? "",
+          [normalizedIssueColumns.kpj]: row.KPJ ?? "",
+          [normalizedIssueColumns.nik]: row.NOMOR_IDENTITAS ?? row.NIK ?? "",
+          [normalizedIssueColumns.pembina]: row.PEMBINA ?? row.NAMA_PEMBINA ?? row.KODE_PEMBINA ?? "",
+          [normalizedIssueColumns.perusahaan]: row.NAMA_PERUSAHAAN ?? row.NAMA_LENGKAP ?? "",
+          [normalizedIssueColumns.tanggal]: row.TGL_PROSES ?? "",
+        });
+      }
+      continue;
+    }
 
     if (contactPair) {
       const emailStatus = qualityStatus(row[contactPair.emailColumn]);
@@ -408,6 +474,7 @@ function convertQualityRows(headers, rows) {
           [normalizedIssueColumns.npp]: row.NPP ?? "",
           [normalizedIssueColumns.kodeTk]: row.KODE_TK ?? "",
           [normalizedIssueColumns.kpj]: row.KPJ ?? "",
+          [normalizedIssueColumns.nik]: row.NOMOR_IDENTITAS ?? row.NIK ?? "",
           [normalizedIssueColumns.pembina]: row.PEMBINA ?? row.NAMA_PEMBINA ?? row.KODE_PEMBINA ?? "",
           [normalizedIssueColumns.perusahaan]: row.NAMA_PERUSAHAAN ?? row.NAMA_LENGKAP ?? "",
           [normalizedIssueColumns.tanggal]: row.TGL_PROSES ?? "",
@@ -435,6 +502,7 @@ function convertQualityRows(headers, rows) {
         [normalizedIssueColumns.npp]: row.NPP ?? "",
         [normalizedIssueColumns.kodeTk]: row.KODE_TK ?? "",
         [normalizedIssueColumns.kpj]: row.KPJ ?? "",
+        [normalizedIssueColumns.nik]: row.NOMOR_IDENTITAS ?? row.NIK ?? "",
         [normalizedIssueColumns.pembina]: row.PEMBINA ?? row.NAMA_PEMBINA ?? row.KODE_PEMBINA ?? "",
         [normalizedIssueColumns.perusahaan]: row.NAMA_PERUSAHAAN ?? row.NAMA_LENGKAP ?? "",
         [normalizedIssueColumns.tanggal]: row.TGL_PROSES ?? "",
@@ -453,6 +521,7 @@ function convertQualityRows(headers, rows) {
     },
     sourceRows: rows.filter((row) => isAllowedKanwilValue(row[kanwilCol])).length,
     issueColumns: issueColumns.length,
+    issueMode: burdenColumns.length ? "kolom beban PKBU JML_*" : "elemen validasi",
   };
 }
 
@@ -742,6 +811,7 @@ function renderPreview(rows) {
         normalizedIssueColumns.npp,
         normalizedIssueColumns.kodeTk,
         normalizedIssueColumns.kpj,
+        normalizedIssueColumns.nik,
         normalizedIssueColumns.perusahaan,
         normalizedIssueColumns.value,
         normalizedIssueColumns.elemen,
@@ -784,6 +854,7 @@ function previewColumns() {
         normalizedIssueColumns.npp,
         normalizedIssueColumns.kodeTk,
         normalizedIssueColumns.kpj,
+        normalizedIssueColumns.nik,
         normalizedIssueColumns.perusahaan,
         normalizedIssueColumns.value,
         normalizedIssueColumns.elemen,
@@ -1271,6 +1342,7 @@ async function saveCurrentData() {
       valueMode: state.valueMode,
       sourceRowCount: state.sourceRowCount,
       savedAt,
+      savedDateKey: localDateKey(savedAt),
     });
     renderUploadMeta(savedAt);
   } catch (error) {
@@ -1283,6 +1355,11 @@ async function restoreSavedData() {
   try {
     const saved = await idbGet(STORAGE_KEY);
     if (!saved?.rows?.length || !saved?.columns?.length || !saved?.mapping) return false;
+    if (isStoredDataExpired(saved)) {
+      await idbDelete(STORAGE_KEY).catch(() => {});
+      els.sourceNote.textContent = `${profilerConfig.subject} tersimpan sudah expired karena sudah berbeda hari. Upload data baru untuk mulai profiling.`;
+      return false;
+    }
     state.rows = saved.rows;
     state.columns = saved.columns;
     state.mapping = saved.mapping;
@@ -1382,6 +1459,7 @@ async function handleFiles(files) {
       ? {
           sourceRows: loadedFiles.reduce((sum, item) => sum + item.qualityData.sourceRows, 0),
           issueColumns: Math.max(...loadedFiles.map((item) => item.qualityData.issueColumns)),
+          issueMode: loadedFiles.find((item) => item.qualityData.issueMode)?.qualityData.issueMode ?? "elemen validasi",
         }
       : null;
     if (profilerConfig.lockedKanwil && mapping.kanwil) {
@@ -1409,7 +1487,7 @@ async function handleFiles(files) {
     els.searchInput.value = "";
     if (els.nppSearchInput) els.nppSearchInput.value = "";
     els.sourceNote.textContent = qualityData
-      ? `${state.fileName}; ${fmtNumber.format(qualityData.sourceRows)} baris sumber; ${fmtNumber.format(rows.length)} temuan kualitas dari ${fmtNumber.format(qualityData.issueColumns)} elemen validasi. Data lama sudah diganti.`
+      ? `${state.fileName}; ${fmtNumber.format(qualityData.sourceRows)} baris sumber; ${fmtNumber.format(rows.length)} temuan kualitas dari ${fmtNumber.format(qualityData.issueColumns)} ${qualityData.issueMode}. Data lama sudah diganti.`
       : `${state.fileName}; ${fmtNumber.format(rows.length)} baris. Kolom nominal: ${mapping.amount}. Data lama sudah diganti.`;
     await saveCurrentData();
     render();
@@ -1465,6 +1543,17 @@ async function clearData() {
 }
 
 function bindEvents() {
+  if (els.pkbuBurdenMode) {
+    els.pkbuBurdenMode.checked = state.pkbuBurdenMode;
+    els.pkbuBurdenMode.addEventListener("change", (event) => {
+      state.pkbuBurdenMode = event.target.checked;
+      localStorage.setItem(`${profilerConfig.storageKey}.pkbuBurdenMode`, state.pkbuBurdenMode ? "1" : "0");
+      showToast(state.pkbuBurdenMode
+        ? "Mode beban JML aktif. Upload ulang file PKBU untuk memakai hitungan 4 kolom JML."
+        : "Mode beban JML nonaktif. Upload ulang file PKBU untuk kembali ke hitungan validasi.");
+    });
+  }
+
   els.fileInput.addEventListener("change", (event) => {
     const files = [...(event.target.files ?? [])];
     if (files.length) handleFiles(profilerConfig.allowMultipleFiles ? files : files.slice(0, 1));

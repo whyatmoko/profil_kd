@@ -121,6 +121,37 @@ async function idbGet(key) {
   });
 }
 
+async function idbDelete(key) {
+  const db = await openProfilerDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("datasets", "readwrite");
+    tx.objectStore("datasets").delete(key);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+}
+
+function localDateKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function isStoredDataExpired(saved) {
+  if (!saved?.savedAt) return true;
+  return localDateKey(saved.savedAt) !== localDateKey();
+}
+
 function groupBy(rows, column, amountColumn) {
   const groups = new Map();
   for (const row of rows) {
@@ -302,6 +333,11 @@ async function loadSummary() {
   const summaries = [];
   for (const config of datasets) {
     const data = await idbGet(config.key).catch(() => null);
+    if (isStoredDataExpired(data)) {
+      if (data) await idbDelete(config.key).catch(() => {});
+      summaries.push(summarizeDataset(config, null));
+      continue;
+    }
     summaries.push(summarizeDataset(config, data));
   }
   renderOverall(summaries);
