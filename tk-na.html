@@ -104,6 +104,7 @@
             </div>
           </div>
           <div id="elementBars" class="bars"></div>
+          <div id="primaryQualityPanel" class="primary-quality"></div>
         </article>
       </section>
 
@@ -111,8 +112,9 @@
         <div class="panel-head">
           <div>
             <h2>Preview Data Terfilter</h2>
-            <p id="tableSubtitle">Maksimal 200 baris ditampilkan.</p>
+            <p id="tableSubtitle">Semua baris terfilter ditampilkan dengan paginasi.</p>
           </div>
+          <button id="downloadFiltered" type="button">Download CSV</button>
           <select id="previewElementFilter" aria-label="Filter elemen preview"></select>
           <input id="searchInput" type="search" placeholder="Cari data..." />
         </div>
@@ -121,6 +123,11 @@
             <thead id="previewHead"></thead>
             <tbody id="previewBody"></tbody>
           </table>
+        </div>
+        <div class="pagination">
+          <button id="prevPage" type="button">Sebelumnya</button>
+          <span id="pageInfo">Halaman 1</span>
+          <button id="nextPage" type="button">Berikutnya</button>
         </div>
       </article>
     </main>
@@ -131,6 +138,7 @@
         storageKey: "tkNaProfiler.activeData.v1",
         subject: "TK NA",
         emptySourceText: "Upload data TK NA untuk mulai profiling.",
+        combineContactCompleteness: true,
       };
     </script>
     <script src="pkbu.js"></script>

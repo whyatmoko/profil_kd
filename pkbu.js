@@ -2,6 +2,7 @@ const profilerConfig = {
   storageKey: "pkbuProfiler.activeData.v1",
   subject: "PKBU",
   emptySourceText: "Upload data PKBU untuk mulai profiling.",
+  combineContactCompleteness: false,
   ...(window.PROFILER_CONFIG ?? {}),
 };
 
@@ -15,6 +16,8 @@ const state = {
   extraColumn: "NONE",
   extraValue: "ALL",
   previewElement: "ALL",
+  previewPage: 1,
+  previewPageSize: 100,
   search: "",
   fileName: "",
   valueMode: "currency",
@@ -42,12 +45,17 @@ const els = {
   elemenSubtitle: document.querySelector("#elemenSubtitle"),
   branchBars: document.querySelector("#branchBars"),
   elementBars: document.querySelector("#elementBars"),
+  primaryQualityPanel: document.querySelector("#primaryQualityPanel"),
   filteredInsights: document.querySelector("#filteredInsights"),
   filteredSubtitle: document.querySelector("#filteredSubtitle"),
   tableSubtitle: document.querySelector("#tableSubtitle"),
+  downloadFiltered: document.querySelector("#downloadFiltered"),
   previewElementFilter: document.querySelector("#previewElementFilter"),
   previewHead: document.querySelector("#previewHead"),
   previewBody: document.querySelector("#previewBody"),
+  prevPage: document.querySelector("#prevPage"),
+  nextPage: document.querySelector("#nextPage"),
+  pageInfo: document.querySelector("#pageInfo"),
   searchInput: document.querySelector("#searchInput"),
   toast: document.querySelector("#toast"),
 };
@@ -347,7 +355,7 @@ function convertQualityRows(headers, rows) {
 
   const kanwilCol = findColumn(headers, "kanwil") || "KODE_WILAYAH";
   const cabangCol = findColumn(headers, "cabang") || "KODE_KANTOR";
-  const contactPair = contactValidationPair(headers);
+  const contactPair = profilerConfig.combineContactCompleteness ? contactValidationPair(headers) : null;
   const converted = [];
 
   for (const row of rows) {
@@ -696,15 +704,130 @@ function renderPreview(rows) {
       ]
     : state.columns.slice(0, 12);
   const columns = preferredColumns.filter((column) => state.columns.includes(column));
+  const totalPages = Math.max(1, Math.ceil(previewRows.length / state.previewPageSize));
+  if (state.previewPage > totalPages) state.previewPage = totalPages;
+  if (state.previewPage < 1) state.previewPage = 1;
+  const start = (state.previewPage - 1) * state.previewPageSize;
+  const pageRows = previewRows.slice(start, start + state.previewPageSize);
   els.previewHead.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>`;
-  els.previewBody.innerHTML = previewRows.slice(0, 200).map((row) => `
+  els.previewBody.innerHTML = pageRows.map((row) => `
     <tr>${columns.map((column) => {
       const isAmount = column === state.mapping.amount;
       const value = isAmount ? formatMeasure(parseNumber(row[column])) : row[column];
       return `<td class="${isAmount ? "num" : ""}" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`;
     }).join("")}</tr>
   `).join("");
-  els.tableSubtitle.textContent = `${fmtNumber.format(previewRows.length)} baris preview cocok; ${fmtNumber.format(Math.min(previewRows.length, 200))} baris ditampilkan.`;
+  els.tableSubtitle.textContent = `${fmtNumber.format(previewRows.length)} baris preview cocok; menampilkan ${fmtNumber.format(pageRows.length)} baris pada halaman ini.`;
+  if (els.pageInfo) {
+    const firstRow = previewRows.length ? start + 1 : 0;
+    const lastRow = Math.min(start + pageRows.length, previewRows.length);
+    els.pageInfo.textContent = `Halaman ${fmtNumber.format(state.previewPage)} / ${fmtNumber.format(totalPages)} (${fmtNumber.format(firstRow)}-${fmtNumber.format(lastRow)} dari ${fmtNumber.format(previewRows.length)})`;
+  }
+  if (els.prevPage) els.prevPage.disabled = state.previewPage <= 1;
+  if (els.nextPage) els.nextPage.disabled = state.previewPage >= totalPages;
+  if (els.downloadFiltered) els.downloadFiltered.disabled = !previewRows.length;
+}
+
+function previewColumns() {
+  const preferredColumns = state.valueMode === "count"
+    ? [
+        normalizedIssueColumns.cabang,
+        normalizedIssueColumns.officeName,
+        normalizedIssueColumns.category,
+        normalizedIssueColumns.npp,
+        normalizedIssueColumns.kodeTk,
+        normalizedIssueColumns.kpj,
+        normalizedIssueColumns.perusahaan,
+        normalizedIssueColumns.value,
+        normalizedIssueColumns.elemen,
+        normalizedIssueColumns.status,
+        normalizedIssueColumns.pembina,
+      ]
+    : state.columns.slice(0, 12);
+  return preferredColumns.filter((column) => state.columns.includes(column));
+}
+
+function previewFilteredRows() {
+  const rows = filteredRows();
+  return state.previewElement === "ALL"
+    ? rows
+    : rows.filter((row) => String(row[state.mapping.elemen] ?? "").trim() === state.previewElement);
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  return /[",\r\n;]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function downloadFilteredCsv() {
+  const rows = previewFilteredRows();
+  if (!rows.length) {
+    showToast("Tidak ada data untuk didownload.");
+    return;
+  }
+  const columns = previewColumns();
+  const csv = [
+    columns.map(csvEscape).join(","),
+    ...rows.map((row) => columns.map((column) => {
+      const isAmount = column === state.mapping.amount;
+      return csvEscape(isAmount ? parseNumber(row[column]) : row[column]);
+    }).join(",")),
+  ].join("\r\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const branch = state.cabang === "ALL" ? "semua-cabang" : state.cabang.toLowerCase();
+  const subject = profilerConfig.subject.toLowerCase().replace(/\s+/g, "-");
+  anchor.href = url;
+  anchor.download = `${subject}-${branch}-preview.csv`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function renderPrimaryQuality(rows) {
+  if (!els.primaryQualityPanel) return;
+  const elementColumn = state.mapping.elemen;
+  const branchColumn = state.mapping.cabang;
+  const statusColumn = normalizedIssueColumns.status;
+  const primaryElements = new Set(["NIK", "NAMA", "TGL LAHIR"]);
+  const primaryRows = rows.filter((row) => primaryElements.has(String(row[elementColumn] ?? "").trim().toUpperCase()));
+  const total = sumAmount(primaryRows);
+
+  if (!primaryRows.length) {
+    els.primaryQualityPanel.innerHTML = `
+      <h3>Data Primer Invalid</h3>
+      <p class="empty">Tidak ada temuan NIK, Nama, atau Tgl Lahir untuk filter aktif.</p>
+    `;
+    return;
+  }
+
+  const branchGroups = groupBySum(primaryRows, branchColumn).slice(0, 10);
+  els.primaryQualityPanel.innerHTML = `
+    <h3>Data Primer Invalid</h3>
+    <p>${fmtNumber.format(countProblemNpp(primaryRows))} data memiliki ${formatMeasure(total)} pada elemen NIK, Nama, dan Tgl Lahir.</p>
+    <div class="table-wrap primary-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Kode Kantor</th>
+            <th>Nama Kantor</th>
+            <th class="num">Jumlah</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${branchGroups.map((item) => `
+            <tr>
+              <td><strong>${escapeHtml(item.name)}</strong></td>
+              <td>${escapeHtml(officeLookup.get(item.name)?.name ?? "-")}</td>
+              <td class="num">${fmtNumber.format(item.total)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 function renderEmpty() {
@@ -717,6 +840,10 @@ function renderEmpty() {
   els.filteredInsights.innerHTML = `<p class="empty">Belum ada data.</p>`;
   els.previewHead.innerHTML = "";
   els.previewBody.innerHTML = "";
+  if (els.pageInfo) els.pageInfo.textContent = "Halaman 1";
+  if (els.prevPage) els.prevPage.disabled = true;
+  if (els.nextPage) els.nextPage.disabled = true;
+  if (els.downloadFiltered) els.downloadFiltered.disabled = true;
   renderUploadMeta();
   setOptions(els.previewElementFilter, [{ value: "ALL", label: "Semua Elemen Preview" }], "ALL");
   setOptions(els.kanwilFilter, [{ value: "905", label: "905" }], "905");
@@ -748,6 +875,7 @@ function render() {
 
   renderBranchPivotTable(els.branchBars, rows, branchGroups, elementGroupsFiltered);
   renderBars(els.elementBars, elementGroupsFiltered, total, 18);
+  renderPrimaryQuality(rows);
   renderInsights(els.filteredInsights, rows, insightScopeLabel());
   renderPreview(rows);
 }
@@ -867,6 +995,7 @@ async function restoreSavedData() {
     state.extraColumn = "NONE";
     state.extraValue = "ALL";
     state.previewElement = "ALL";
+    state.previewPage = 1;
     state.search = "";
     els.sourceNote.textContent = `${state.fileName}; data dipulihkan dari browser. Upload file baru untuk mengganti data ini.`;
     renderUploadMeta(saved.savedAt);
@@ -984,6 +1113,7 @@ function resetFilters() {
   state.extraColumn = "NONE";
   state.extraValue = "ALL";
   state.previewElement = "ALL";
+  state.previewPage = 1;
   state.search = "";
   els.searchInput.value = "";
   render();
@@ -998,6 +1128,7 @@ async function clearData() {
   state.sourceRowCount = 0;
   state.search = "";
   state.previewElement = "ALL";
+  state.previewPage = 1;
   els.fileInput.value = "";
   els.searchInput.value = "";
   els.sourceNote.textContent = profilerConfig.emptySourceText;
@@ -1017,33 +1148,49 @@ function bindEvents() {
   els.resetFilters.addEventListener("click", resetFilters);
   els.kanwilFilter.addEventListener("change", (event) => {
     state.kanwil = event.target.value;
+    state.previewPage = 1;
     render();
   });
   els.cabangFilter.addEventListener("change", (event) => {
     state.cabang = event.target.value;
+    state.previewPage = 1;
     render();
   });
   els.elemenFilter.addEventListener("change", (event) => {
     state.elemen = event.target.value;
+    state.previewPage = 1;
     render();
   });
   els.extraColumnFilter.addEventListener("change", (event) => {
     state.extraColumn = event.target.value;
     state.extraValue = "ALL";
+    state.previewPage = 1;
     render();
   });
   els.extraValueFilter.addEventListener("change", (event) => {
     state.extraValue = event.target.value;
+    state.previewPage = 1;
     render();
   });
   els.previewElementFilter.addEventListener("change", (event) => {
     state.previewElement = event.target.value;
+    state.previewPage = 1;
     render();
   });
   els.searchInput.addEventListener("input", (event) => {
     state.search = event.target.value.trim().toLowerCase();
+    state.previewPage = 1;
     render();
   });
+  els.prevPage?.addEventListener("click", () => {
+    state.previewPage -= 1;
+    render();
+  });
+  els.nextPage?.addEventListener("click", () => {
+    state.previewPage += 1;
+    render();
+  });
+  els.downloadFiltered?.addEventListener("click", downloadFilteredCsv);
 }
 
 bindEvents();
