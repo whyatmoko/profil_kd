@@ -162,8 +162,7 @@ h2 {
 }
 
 .toolbar {
-  display: grid;
-  grid-template-columns: minmax(120px, 0.65fr) minmax(160px, 1fr) minmax(160px, 1fr) minmax(160px, 1fr) minmax(160px, 1fr) auto;
+  display: flex;
   align-items: end;
   gap: 10px;
   padding: 14px;
@@ -171,6 +170,14 @@ h2 {
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+
+.toolbar label {
+  flex: 1 1 0;
+}
+
+.toolbar button {
+  flex: 0 0 92px;
 }
 
 label {
@@ -254,6 +261,13 @@ button:hover {
   gap: 16px;
 }
 
+.detail-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.85fr) minmax(520px, 1.15fr);
+  align-items: start;
+  gap: 16px;
+}
+
 .panel {
   min-width: 0;
   overflow: hidden;
@@ -287,6 +301,27 @@ button:hover {
   flex: 0 0 auto;
   min-width: 116px;
   min-height: 36px;
+}
+
+.preview-panel .panel-head {
+  display: grid;
+  grid-template-columns: auto minmax(170px, 220px) minmax(190px, 1fr);
+  align-items: end;
+}
+
+.preview-panel .panel-head > div {
+  grid-column: 1 / -1;
+}
+
+.preview-panel .panel-head select,
+.preview-panel .panel-head input[type="search"] {
+  width: 100%;
+  max-width: none;
+  margin-left: 0;
+}
+
+.preview-panel .panel-head button {
+  width: auto;
 }
 
 .bars,
@@ -695,6 +730,40 @@ th {
   white-space: normal;
 }
 
+.npp-pivot-panel {
+  padding: 14px 16px 16px;
+}
+
+.npp-pivot-wrap {
+  max-height: 430px;
+  margin-top: 0;
+  border: 1px solid #e3e9f2;
+  border-radius: 8px;
+}
+
+.npp-pivot-table {
+  min-width: 920px;
+  font-size: 11.5px;
+}
+
+.npp-pivot-table th,
+.npp-pivot-table td {
+  padding: 7px 9px;
+}
+
+.npp-pivot-table th:first-child,
+.npp-pivot-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+}
+
+.npp-pivot-table th:first-child {
+  z-index: 3;
+  background: #f8fafc;
+}
+
 .compact-pagination {
   padding: 8px 0 0;
   border-top: 0;
@@ -778,6 +847,10 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
   .topbar {
     display: grid;
   }
@@ -787,7 +860,7 @@ th {
   }
 
   .toolbar {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow-x: auto;
   }
 
   .kpis {
@@ -821,7 +894,6 @@ th {
   }
 
   .upload-box,
-  .toolbar,
   .kpis {
     grid-template-columns: 1fr;
   }
@@ -850,6 +922,10 @@ th {
 
   .panel-head button {
     width: 100%;
+  }
+
+  .preview-panel .panel-head {
+    grid-template-columns: 1fr;
   }
 
   .pagination {

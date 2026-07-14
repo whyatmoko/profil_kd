@@ -13,6 +13,7 @@ const state = {
   mapping: {},
   kanwil: "905",
   cabang: "ALL",
+  segment: "ALL",
   elemen: "ALL",
   extraColumn: "NONE",
   extraValue: "ALL",
@@ -22,6 +23,9 @@ const state = {
   pembinaSearch: "",
   pembinaPage: 1,
   pembinaPageSize: 25,
+  nppSearch: "",
+  nppPage: 1,
+  nppPageSize: 50,
   search: "",
   fileName: "",
   valueMode: "currency",
@@ -38,6 +42,7 @@ const els = {
   uploadMeta: document.querySelector("#uploadMeta"),
   kanwilFilter: document.querySelector("#kanwilFilter"),
   cabangFilter: document.querySelector("#cabangFilter"),
+  segmentFilter: document.querySelector("#segmentFilter"),
   elemenFilter: document.querySelector("#elemenFilter"),
   extraColumnFilter: document.querySelector("#extraColumnFilter"),
   extraValueFilter: document.querySelector("#extraValueFilter"),
@@ -54,6 +59,9 @@ const els = {
   pembinaPanel: document.querySelector("#pembinaPanel"),
   pembinaSubtitle: document.querySelector("#pembinaSubtitle"),
   pembinaSearchInput: document.querySelector("#pembinaSearchInput"),
+  nppPivotPanel: document.querySelector("#nppPivotPanel"),
+  nppPivotSubtitle: document.querySelector("#nppPivotSubtitle"),
+  nppSearchInput: document.querySelector("#nppSearchInput"),
   filteredInsights: document.querySelector("#filteredInsights"),
   filteredSubtitle: document.querySelector("#filteredSubtitle"),
   tableSubtitle: document.querySelector("#tableSubtitle"),
@@ -146,6 +154,7 @@ const normalizedIssueColumns = {
   value: "Nilai Elemen",
   officeName: "Nama Kantor",
   category: "Kategori",
+  segment: "Segmen",
   npp: "NPP",
   kodeTk: "Kode TK",
   kpj: "KPJ",
@@ -386,6 +395,7 @@ function convertQualityRows(headers, rows) {
           [normalizedIssueColumns.cabang]: row[cabangCol] ?? "",
           [normalizedIssueColumns.officeName]: officeLookup.get(String(row[cabangCol] ?? "").trim())?.name ?? "",
           [normalizedIssueColumns.category]: row.KATEGORI ?? "",
+          [normalizedIssueColumns.segment]: row.KODE_SEGMEN ?? "",
           [normalizedIssueColumns.elemen]: "EMAIL / HANDPHONE",
           [normalizedIssueColumns.amount]: 1,
           [normalizedIssueColumns.status]: `${emailStatus} & ${phoneStatus}`,
@@ -415,6 +425,7 @@ function convertQualityRows(headers, rows) {
         [normalizedIssueColumns.cabang]: row[cabangCol] ?? "",
         [normalizedIssueColumns.officeName]: officeLookup.get(String(row[cabangCol] ?? "").trim())?.name ?? "",
         [normalizedIssueColumns.category]: row.KATEGORI ?? "",
+        [normalizedIssueColumns.segment]: row.KODE_SEGMEN ?? "",
         [normalizedIssueColumns.elemen]: elementLabel,
         [normalizedIssueColumns.amount]: 1,
         [normalizedIssueColumns.status]: status,
@@ -479,11 +490,12 @@ function baselineRows905() {
 }
 
 function filteredRows() {
-  const { kanwil, cabang, elemen, extraColumn, extraValue } = state;
+  const { kanwil, cabang, segment, elemen, extraColumn, extraValue } = state;
   const { kanwil: kanwilCol, cabang: cabangCol, elemen: elemenCol } = state.mapping;
   return state.rows.filter((row) => {
     if (kanwilCol && kanwil !== "ALL" && String(row[kanwilCol] ?? "").trim() !== kanwil) return false;
     if (cabangCol && cabang !== "ALL" && String(row[cabangCol] ?? "").trim() !== cabang) return false;
+    if (els.segmentFilter && segment !== "ALL" && String(row[normalizedIssueColumns.segment] ?? "").trim() !== segment) return false;
     if (elemenCol && elemen !== "ALL" && String(row[elemenCol] ?? "").trim() !== elemen) return false;
     if (extraColumn !== "NONE" && extraValue !== "ALL" && String(row[extraColumn] ?? "").trim() !== extraValue) return false;
     if (state.search) {
@@ -669,6 +681,7 @@ function formatInsightBody(body) {
 function renderFilters() {
   const kanwils = uniqueValues(state.rows, state.mapping.kanwil);
   const cabangs = uniqueValues(state.rows, state.mapping.cabang);
+  const segments = uniqueValues(state.rows, normalizedIssueColumns.segment);
   const elemens = uniqueValues(state.rows, state.mapping.elemen);
   const categoricalColumns = state.columns.filter((column) => column !== state.mapping.amount);
 
@@ -678,6 +691,7 @@ function renderFilters() {
     state.kanwil = kanwils.includes("905") ? "905" : "ALL";
   }
   if (state.mapping.cabang && !cabangs.includes(state.cabang)) state.cabang = "ALL";
+  if (els.segmentFilter && !segments.includes(state.segment)) state.segment = "ALL";
   if (state.mapping.elemen && !elemens.includes(state.elemen)) state.elemen = "ALL";
   if (!categoricalColumns.includes(state.extraColumn)) state.extraColumn = "NONE";
 
@@ -690,6 +704,9 @@ function renderFilters() {
   );
   els.kanwilFilter.disabled = Boolean(profilerConfig.lockedKanwil);
   setOptions(els.cabangFilter, [{ value: "ALL", label: "Semua Cabang" }, ...cabangs.map((value) => ({ value, label: officeLabel(value) }))], state.cabang);
+  if (els.segmentFilter) {
+    setOptions(els.segmentFilter, [{ value: "ALL", label: "Semua Segmen" }, ...segments.map((value) => ({ value, label: value }))], state.segment);
+  }
   setOptions(els.elemenFilter, [{ value: "ALL", label: "Semua Elemen" }, ...elemens.map((value) => ({ value, label: value }))], state.elemen);
   setOptions(
     els.extraColumnFilter,
@@ -719,6 +736,7 @@ function renderPreview(rows) {
     ? [
         normalizedIssueColumns.cabang,
         normalizedIssueColumns.officeName,
+        normalizedIssueColumns.segment,
         normalizedIssueColumns.category,
         normalizedIssueColumns.npp,
         normalizedIssueColumns.kodeTk,
@@ -760,6 +778,7 @@ function previewColumns() {
     ? [
         normalizedIssueColumns.cabang,
         normalizedIssueColumns.officeName,
+        normalizedIssueColumns.segment,
         normalizedIssueColumns.category,
         normalizedIssueColumns.npp,
         normalizedIssueColumns.kodeTk,
@@ -879,6 +898,103 @@ function renderPrimaryQuality(rows) {
   `;
 }
 
+function renderNppPivotPanel(rows) {
+  if (!els.nppPivotPanel) return;
+
+  const branchColumn = state.mapping.cabang;
+  const elementColumn = state.mapping.elemen;
+  const amountColumn = state.mapping.amount;
+  const nppColumn = normalizedIssueColumns.npp;
+  const segmentColumn = normalizedIssueColumns.segment;
+
+  if (!branchColumn || !elementColumn || !nppColumn || !rows.length) {
+    els.nppPivotPanel.innerHTML = `<p class="empty">Tidak ada data NPP untuk filter aktif.</p>`;
+    if (els.nppPivotSubtitle) els.nppPivotSubtitle.textContent = "Beban elemen no good per NPP.";
+    return;
+  }
+
+  const elementGroups = groupBySum(rows, elementColumn);
+  const elementNames = elementGroups.map((item) => item.name);
+  const groups = new Map();
+
+  for (const row of rows) {
+    const branch = String(row[branchColumn] ?? "").trim() || "-";
+    const segment = String(row[segmentColumn] ?? "").trim() || "-";
+    const npp = String(row[nppColumn] ?? "").trim() || "-";
+    const element = String(row[elementColumn] ?? "").trim() || "Kosong";
+    const key = `${branch}|${segment}|${npp}`;
+    const current = groups.get(key) ?? { branch, segment, npp, total: 0, elements: new Map() };
+    const amount = parseNumber(row[amountColumn]);
+    current.total += amount;
+    current.elements.set(element, (current.elements.get(element) ?? 0) + amount);
+    groups.set(key, current);
+  }
+
+  const search = state.nppSearch;
+  const items = [...groups.values()]
+    .filter((item) => !search || item.npp.toLowerCase().includes(search))
+    .sort((a, b) => b.total - a.total || a.branch.localeCompare(b.branch, "id", { numeric: true }) || a.npp.localeCompare(b.npp, "id", { numeric: true }));
+
+  const totalPages = Math.max(1, Math.ceil(items.length / state.nppPageSize));
+  if (state.nppPage > totalPages) state.nppPage = totalPages;
+  if (state.nppPage < 1) state.nppPage = 1;
+
+  const start = (state.nppPage - 1) * state.nppPageSize;
+  const visible = items.slice(start, start + state.nppPageSize);
+  const firstRow = items.length ? start + 1 : 0;
+  const lastRow = Math.min(start + visible.length, items.length);
+
+  if (els.nppPivotSubtitle) {
+    els.nppPivotSubtitle.textContent = `${fmtNumber.format(items.length)} NPP cocok; menampilkan ${fmtNumber.format(firstRow)}-${fmtNumber.format(lastRow)} dari ${fmtNumber.format(items.length)} NPP.`;
+  }
+
+  if (!visible.length) {
+    els.nppPivotPanel.innerHTML = `<p class="empty">Tidak ada NPP yang cocok dengan pencarian.</p>`;
+    return;
+  }
+
+  els.nppPivotPanel.innerHTML = `
+    <div class="table-wrap npp-pivot-wrap">
+      <table class="npp-pivot-table">
+        <thead>
+          <tr>
+            <th>Kode Cabang</th>
+            <th>Segmen</th>
+            <th>NPP</th>
+            ${elementNames.map((element) => `<th class="num">${escapeHtml(element)}</th>`).join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${visible.map((item) => `
+            <tr>
+              <td><strong>${escapeHtml(item.branch)}</strong></td>
+              <td>${escapeHtml(item.segment)}</td>
+              <td>${escapeHtml(item.npp)}</td>
+              ${elementNames.map((element) => {
+                const value = item.elements.get(element) ?? 0;
+                return `<td class="num">${value ? fmtNumber.format(value) : "-"}</td>`;
+              }).join("")}
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="pagination compact-pagination">
+      <button id="prevNppPage" type="button" ${state.nppPage <= 1 ? "disabled" : ""}>Sebelumnya</button>
+      <span>Halaman ${fmtNumber.format(state.nppPage)} / ${fmtNumber.format(totalPages)}</span>
+      <button id="nextNppPage" type="button" ${state.nppPage >= totalPages ? "disabled" : ""}>Berikutnya</button>
+    </div>
+  `;
+  els.nppPivotPanel.querySelector("#prevNppPage")?.addEventListener("click", () => {
+    state.nppPage -= 1;
+    render();
+  });
+  els.nppPivotPanel.querySelector("#nextNppPage")?.addEventListener("click", () => {
+    state.nppPage += 1;
+    render();
+  });
+}
+
 function renderPembinaPanel(rows) {
   if (!els.pembinaPanel) return;
   if (profilerConfig.subject !== "PKBU") {
@@ -965,6 +1081,8 @@ function renderEmpty() {
   els.elementBars.innerHTML = `<p class="empty">Data baru akan mengganti data yang sedang tampil.</p>`;
   if (els.pembinaPanel) els.pembinaPanel.innerHTML = `<p class="empty">Belum ada data pembina.</p>`;
   if (els.pembinaSubtitle) els.pembinaSubtitle.textContent = "Pembina dengan total elemen PKBU invalid terbanyak.";
+  if (els.nppPivotPanel) els.nppPivotPanel.innerHTML = `<p class="empty">Belum ada data NPP.</p>`;
+  if (els.nppPivotSubtitle) els.nppPivotSubtitle.textContent = "Beban elemen no good per NPP.";
   els.filteredInsights.innerHTML = `<p class="empty">Belum ada data.</p>`;
   els.previewHead.innerHTML = "";
   els.previewBody.innerHTML = "";
@@ -977,6 +1095,7 @@ function renderEmpty() {
   setOptions(els.kanwilFilter, [{ value: "905", label: "905 - Kanwil Jateng DIY" }], "905");
   els.kanwilFilter.disabled = true;
   setOptions(els.cabangFilter, [{ value: "ALL", label: "Semua Cabang" }], "ALL");
+  if (els.segmentFilter) setOptions(els.segmentFilter, [{ value: "ALL", label: "Semua Segmen" }], "ALL");
   setOptions(els.elemenFilter, [{ value: "ALL", label: "Semua Elemen" }], "ALL");
   setOptions(els.extraColumnFilter, [{ value: "NONE", label: "Tidak ada" }], "NONE");
   setOptions(els.extraValueFilter, [{ value: "ALL", label: "Semua Nilai" }], "ALL");
@@ -1005,6 +1124,7 @@ function render() {
   renderBranchPivotTable(els.branchBars, rows, branchGroups, elementGroupsFiltered);
   renderBars(els.elementBars, elementGroupsFiltered, total, 18);
   renderPrimaryQuality(rows);
+  renderNppPivotPanel(rows);
   renderPembinaPanel(rows);
   renderInsights(els.filteredInsights, rows, insightScopeLabel());
   renderPreview(rows);
@@ -1014,6 +1134,7 @@ function activeFilterLabel() {
   const parts = [];
   if (state.mapping.kanwil) parts.push(`Kanwil ${state.kanwil === "ALL" ? "semua" : state.kanwil}`);
   if (state.cabang !== "ALL") parts.push(`Cabang ${officeLabel(state.cabang)}`);
+  if (state.segment !== "ALL") parts.push(`Segmen ${state.segment}`);
   if (state.elemen !== "ALL") parts.push(`Elemen ${state.elemen}`);
   if (state.extraColumn !== "NONE" && state.extraValue !== "ALL") parts.push(`${state.extraColumn}: ${state.extraValue}`);
   return parts.length ? parts.join(" | ") : "Semua data.";
@@ -1021,6 +1142,7 @@ function activeFilterLabel() {
 
 function insightScopeLabel() {
   if (state.cabang !== "ALL") return `Cabang ${officeLabel(state.cabang)}`;
+  if (state.segment !== "ALL") return `Segmen ${state.segment}`;
   if (state.elemen !== "ALL") return `Elemen ${state.elemen}`;
   if (state.extraColumn !== "NONE" && state.extraValue !== "ALL") return "filter aktif";
   return state.kanwil === "ALL" ? "semua Kanwil" : `Kanwil ${state.kanwil}`;
@@ -1121,6 +1243,7 @@ async function restoreSavedData() {
     state.sourceRowCount = saved.sourceRowCount ?? saved.rows.length;
     state.kanwil = profilerConfig.lockedKanwil ?? (state.mapping.kanwil && uniqueValues(state.rows, state.mapping.kanwil).includes("905") ? "905" : "ALL");
     state.cabang = "ALL";
+    state.segment = "ALL";
     state.elemen = "ALL";
     state.extraColumn = "NONE";
     state.extraValue = "ALL";
@@ -1227,12 +1350,16 @@ async function handleFiles(files) {
     state.sourceRowCount = qualityData?.sourceRows ?? rows.length;
     state.kanwil = profilerConfig.lockedKanwil ?? (mapping.kanwil && uniqueValues(rows, mapping.kanwil).includes("905") ? "905" : "ALL");
     state.cabang = "ALL";
+    state.segment = "ALL";
     state.elemen = "ALL";
     state.extraColumn = "NONE";
     state.extraValue = "ALL";
     state.previewElement = "ALL";
     state.search = "";
+    state.nppSearch = "";
+    state.nppPage = 1;
     els.searchInput.value = "";
+    if (els.nppSearchInput) els.nppSearchInput.value = "";
     els.sourceNote.textContent = qualityData
       ? `${state.fileName}; ${fmtNumber.format(qualityData.sourceRows)} baris sumber; ${fmtNumber.format(rows.length)} temuan kualitas dari ${fmtNumber.format(qualityData.issueColumns)} elemen validasi. Data lama sudah diganti.`
       : `${state.fileName}; ${fmtNumber.format(rows.length)} baris. Kolom nominal: ${mapping.amount}. Data lama sudah diganti.`;
@@ -1247,6 +1374,7 @@ async function handleFiles(files) {
 function resetFilters() {
   state.kanwil = profilerConfig.lockedKanwil ?? (state.mapping.kanwil && uniqueValues(state.rows, state.mapping.kanwil).includes("905") ? "905" : "ALL");
   state.cabang = "ALL";
+  state.segment = "ALL";
   state.elemen = "ALL";
   state.extraColumn = "NONE";
   state.extraValue = "ALL";
@@ -1254,9 +1382,12 @@ function resetFilters() {
   state.previewPage = 1;
   state.pembinaSearch = "";
   state.pembinaPage = 1;
+  state.nppSearch = "";
+  state.nppPage = 1;
   state.search = "";
   els.searchInput.value = "";
   if (els.pembinaSearchInput) els.pembinaSearchInput.value = "";
+  if (els.nppSearchInput) els.nppSearchInput.value = "";
   render();
 }
 
@@ -1264,6 +1395,7 @@ async function clearData() {
   state.rows = [];
   state.columns = [];
   state.mapping = {};
+  state.segment = "ALL";
   state.fileName = "";
   state.valueMode = "currency";
   state.sourceRowCount = 0;
@@ -1272,9 +1404,12 @@ async function clearData() {
   state.previewPage = 1;
   state.pembinaSearch = "";
   state.pembinaPage = 1;
+  state.nppSearch = "";
+  state.nppPage = 1;
   els.fileInput.value = "";
   els.searchInput.value = "";
   if (els.pembinaSearchInput) els.pembinaSearchInput.value = "";
+  if (els.nppSearchInput) els.nppSearchInput.value = "";
   els.sourceNote.textContent = profilerConfig.emptySourceText;
   await idbDelete(STORAGE_KEY).catch(() => {});
   renderUploadMeta();
@@ -1295,18 +1430,28 @@ function bindEvents() {
     state.kanwil = event.target.value;
     state.previewPage = 1;
     state.pembinaPage = 1;
+    state.nppPage = 1;
     render();
   });
   els.cabangFilter.addEventListener("change", (event) => {
     state.cabang = event.target.value;
     state.previewPage = 1;
     state.pembinaPage = 1;
+    state.nppPage = 1;
+    render();
+  });
+  els.segmentFilter?.addEventListener("change", (event) => {
+    state.segment = event.target.value;
+    state.previewPage = 1;
+    state.pembinaPage = 1;
+    state.nppPage = 1;
     render();
   });
   els.elemenFilter.addEventListener("change", (event) => {
     state.elemen = event.target.value;
     state.previewPage = 1;
     state.pembinaPage = 1;
+    state.nppPage = 1;
     render();
   });
   els.extraColumnFilter.addEventListener("change", (event) => {
@@ -1314,12 +1459,14 @@ function bindEvents() {
     state.extraValue = "ALL";
     state.previewPage = 1;
     state.pembinaPage = 1;
+    state.nppPage = 1;
     render();
   });
   els.extraValueFilter.addEventListener("change", (event) => {
     state.extraValue = event.target.value;
     state.previewPage = 1;
     state.pembinaPage = 1;
+    state.nppPage = 1;
     render();
   });
   els.previewElementFilter.addEventListener("change", (event) => {
@@ -1330,6 +1477,7 @@ function bindEvents() {
   els.searchInput.addEventListener("input", (event) => {
     state.search = event.target.value.trim().toLowerCase();
     state.previewPage = 1;
+    state.nppPage = 1;
     render();
   });
   els.prevPage?.addEventListener("click", () => {
@@ -1344,6 +1492,11 @@ function bindEvents() {
   els.pembinaSearchInput?.addEventListener("input", (event) => {
     state.pembinaSearch = event.target.value.trim().toLowerCase();
     state.pembinaPage = 1;
+    render();
+  });
+  els.nppSearchInput?.addEventListener("input", (event) => {
+    state.nppSearch = event.target.value.trim().toLowerCase();
+    state.nppPage = 1;
     render();
   });
 }
