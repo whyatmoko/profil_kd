@@ -26,6 +26,7 @@
       </div>
       <div class="upload-box">
         <input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" />
+        <button id="downloadPdf" type="button">Download PDF</button>
         <button id="clearData" type="button">Hapus Data</button>
         <div id="uploadMeta" class="upload-meta">Belum ada data tersimpan.</div>
       </div>
@@ -104,6 +105,17 @@
             </div>
           </div>
           <div id="elementBars" class="bars"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Beban PKBU per Pembina</h2>
+              <p id="pembinaSubtitle">Pembina dengan total elemen PKBU invalid terbanyak.</p>
+            </div>
+            <input id="pembinaSearchInput" type="search" placeholder="Filter pembina..." />
+          </div>
+          <div id="pembinaPanel" class="pembina-panel"></div>
         </article>
       </section>
 

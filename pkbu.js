@@ -18,6 +18,9 @@ const state = {
   previewElement: "ALL",
   previewPage: 1,
   previewPageSize: 100,
+  pembinaSearch: "",
+  pembinaPage: 1,
+  pembinaPageSize: 25,
   search: "",
   fileName: "",
   valueMode: "currency",
@@ -29,6 +32,7 @@ const STORAGE_KEY = profilerConfig.storageKey;
 const els = {
   fileInput: document.querySelector("#fileInput"),
   clearData: document.querySelector("#clearData"),
+  downloadPdf: document.querySelector("#downloadPdf"),
   sourceNote: document.querySelector("#sourceNote"),
   uploadMeta: document.querySelector("#uploadMeta"),
   kanwilFilter: document.querySelector("#kanwilFilter"),
@@ -46,6 +50,9 @@ const els = {
   branchBars: document.querySelector("#branchBars"),
   elementBars: document.querySelector("#elementBars"),
   primaryQualityPanel: document.querySelector("#primaryQualityPanel"),
+  pembinaPanel: document.querySelector("#pembinaPanel"),
+  pembinaSubtitle: document.querySelector("#pembinaSubtitle"),
+  pembinaSearchInput: document.querySelector("#pembinaSearchInput"),
   filteredInsights: document.querySelector("#filteredInsights"),
   filteredSubtitle: document.querySelector("#filteredSubtitle"),
   tableSubtitle: document.querySelector("#tableSubtitle"),
@@ -70,6 +77,8 @@ const fmtPct = new Intl.NumberFormat("id-ID", {
   style: "percent",
   maximumFractionDigits: 1,
 });
+
+let printLockedControls = [];
 
 const columnAliases = {
   kanwil: ["kanwil", "kode kanwil", "kd kanwil", "kode wilayah", "wilayah", "kacab induk"],
@@ -786,6 +795,28 @@ function downloadFilteredCsv() {
   URL.revokeObjectURL(url);
 }
 
+function lockFiltersForPrint() {
+  printLockedControls = [...document.querySelectorAll(".toolbar select, .toolbar button, .panel-head select, .panel-head input, .panel-head button, .pagination button")]
+    .map((control) => ({ control, disabled: control.disabled }));
+  for (const { control } of printLockedControls) {
+    control.disabled = true;
+  }
+  document.body.classList.add("printing-locked");
+}
+
+function unlockFiltersAfterPrint() {
+  for (const { control, disabled } of printLockedControls) {
+    control.disabled = disabled;
+  }
+  printLockedControls = [];
+  document.body.classList.remove("printing-locked");
+}
+
+function downloadPdf() {
+  lockFiltersForPrint();
+  window.print();
+}
+
 function renderPrimaryQuality(rows) {
   if (!els.primaryQualityPanel) return;
   const elementColumn = state.mapping.elemen;
@@ -830,6 +861,83 @@ function renderPrimaryQuality(rows) {
   `;
 }
 
+function renderPembinaPanel(rows) {
+  if (!els.pembinaPanel) return;
+  if (profilerConfig.subject !== "PKBU") {
+    els.pembinaPanel.closest(".panel").hidden = true;
+    return;
+  }
+
+  els.pembinaPanel.closest(".panel").hidden = false;
+  const pembinaColumn = normalizedIssueColumns.pembina;
+  const branchColumn = state.mapping.cabang;
+  const groups = new Map();
+
+  for (const row of rows) {
+    const pembina = String(row[pembinaColumn] ?? "").trim() || "Tanpa Pembina";
+    const branch = String(row[branchColumn] ?? "").trim() || "-";
+    const key = `${pembina}|${branch}`;
+    const current = groups.get(key) ?? { pembina, branch, total: 0 };
+    current.total += parseNumber(row[state.mapping.amount]);
+    groups.set(key, current);
+  }
+
+  const items = [...groups.values()]
+    .filter((item) => !state.pembinaSearch || `${item.pembina} ${item.branch}`.toLowerCase().includes(state.pembinaSearch))
+    .sort((a, b) => b.total - a.total);
+  const totalPages = Math.max(1, Math.ceil(items.length / state.pembinaPageSize));
+  if (state.pembinaPage > totalPages) state.pembinaPage = totalPages;
+  if (state.pembinaPage < 1) state.pembinaPage = 1;
+  const start = (state.pembinaPage - 1) * state.pembinaPageSize;
+  const visible = items.slice(start, start + state.pembinaPageSize);
+  const total = items.reduce((sum, item) => sum + item.total, 0);
+
+  if (els.pembinaSubtitle) {
+    els.pembinaSubtitle.textContent = `${fmtNumber.format(items.length)} pembina/kantor cocok; total ${formatMeasure(total)}.`;
+  }
+
+  if (!visible.length) {
+    els.pembinaPanel.innerHTML = `<p class="empty">Tidak ada data pembina untuk filter aktif.</p>`;
+    return;
+  }
+
+  els.pembinaPanel.innerHTML = `
+    <div class="table-wrap pembina-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Pembina</th>
+            <th>Kode Kantor</th>
+            <th class="num">Total Temuan</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${visible.map((item) => `
+            <tr>
+              <td><strong>${escapeHtml(item.pembina)}</strong></td>
+              <td>${escapeHtml(item.branch)}</td>
+              <td class="num">${fmtNumber.format(item.total)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="pagination compact-pagination">
+      <button id="prevPembinaPage" type="button" ${state.pembinaPage <= 1 ? "disabled" : ""}>Sebelumnya</button>
+      <span>Halaman ${fmtNumber.format(state.pembinaPage)} / ${fmtNumber.format(totalPages)}</span>
+      <button id="nextPembinaPage" type="button" ${state.pembinaPage >= totalPages ? "disabled" : ""}>Berikutnya</button>
+    </div>
+  `;
+  els.pembinaPanel.querySelector("#prevPembinaPage")?.addEventListener("click", () => {
+    state.pembinaPage -= 1;
+    render();
+  });
+  els.pembinaPanel.querySelector("#nextPembinaPage")?.addEventListener("click", () => {
+    state.pembinaPage += 1;
+    render();
+  });
+}
+
 function renderEmpty() {
   els.kpiTotal.textContent = "-";
   els.kpiRows.textContent = "-";
@@ -837,6 +945,8 @@ function renderEmpty() {
   els.kpiTopElemen.textContent = "-";
   els.branchBars.innerHTML = `<p class="empty">Upload file CSV, TSV, TXT, XLS, atau XLSX.</p>`;
   els.elementBars.innerHTML = `<p class="empty">Data baru akan mengganti data yang sedang tampil.</p>`;
+  if (els.pembinaPanel) els.pembinaPanel.innerHTML = `<p class="empty">Belum ada data pembina.</p>`;
+  if (els.pembinaSubtitle) els.pembinaSubtitle.textContent = "Pembina dengan total elemen PKBU invalid terbanyak.";
   els.filteredInsights.innerHTML = `<p class="empty">Belum ada data.</p>`;
   els.previewHead.innerHTML = "";
   els.previewBody.innerHTML = "";
@@ -876,6 +986,7 @@ function render() {
   renderBranchPivotTable(els.branchBars, rows, branchGroups, elementGroupsFiltered);
   renderBars(els.elementBars, elementGroupsFiltered, total, 18);
   renderPrimaryQuality(rows);
+  renderPembinaPanel(rows);
   renderInsights(els.filteredInsights, rows, insightScopeLabel());
   renderPreview(rows);
 }
@@ -996,6 +1107,8 @@ async function restoreSavedData() {
     state.extraValue = "ALL";
     state.previewElement = "ALL";
     state.previewPage = 1;
+    state.pembinaSearch = "";
+    state.pembinaPage = 1;
     state.search = "";
     els.sourceNote.textContent = `${state.fileName}; data dipulihkan dari browser. Upload file baru untuk mengganti data ini.`;
     renderUploadMeta(saved.savedAt);
@@ -1114,8 +1227,11 @@ function resetFilters() {
   state.extraValue = "ALL";
   state.previewElement = "ALL";
   state.previewPage = 1;
+  state.pembinaSearch = "";
+  state.pembinaPage = 1;
   state.search = "";
   els.searchInput.value = "";
+  if (els.pembinaSearchInput) els.pembinaSearchInput.value = "";
   render();
 }
 
@@ -1129,8 +1245,11 @@ async function clearData() {
   state.search = "";
   state.previewElement = "ALL";
   state.previewPage = 1;
+  state.pembinaSearch = "";
+  state.pembinaPage = 1;
   els.fileInput.value = "";
   els.searchInput.value = "";
+  if (els.pembinaSearchInput) els.pembinaSearchInput.value = "";
   els.sourceNote.textContent = profilerConfig.emptySourceText;
   await idbDelete(STORAGE_KEY).catch(() => {});
   renderUploadMeta();
@@ -1145,31 +1264,37 @@ function bindEvents() {
   els.clearData.addEventListener("click", () => {
     clearData();
   });
+  els.downloadPdf?.addEventListener("click", downloadPdf);
   els.resetFilters.addEventListener("click", resetFilters);
   els.kanwilFilter.addEventListener("change", (event) => {
     state.kanwil = event.target.value;
     state.previewPage = 1;
+    state.pembinaPage = 1;
     render();
   });
   els.cabangFilter.addEventListener("change", (event) => {
     state.cabang = event.target.value;
     state.previewPage = 1;
+    state.pembinaPage = 1;
     render();
   });
   els.elemenFilter.addEventListener("change", (event) => {
     state.elemen = event.target.value;
     state.previewPage = 1;
+    state.pembinaPage = 1;
     render();
   });
   els.extraColumnFilter.addEventListener("change", (event) => {
     state.extraColumn = event.target.value;
     state.extraValue = "ALL";
     state.previewPage = 1;
+    state.pembinaPage = 1;
     render();
   });
   els.extraValueFilter.addEventListener("change", (event) => {
     state.extraValue = event.target.value;
     state.previewPage = 1;
+    state.pembinaPage = 1;
     render();
   });
   els.previewElementFilter.addEventListener("change", (event) => {
@@ -1191,7 +1316,13 @@ function bindEvents() {
     render();
   });
   els.downloadFiltered?.addEventListener("click", downloadFilteredCsv);
+  els.pembinaSearchInput?.addEventListener("input", (event) => {
+    state.pembinaSearch = event.target.value.trim().toLowerCase();
+    state.pembinaPage = 1;
+    render();
+  });
 }
 
 bindEvents();
+window.addEventListener("afterprint", unlockFiltersAfterPrint);
 restoreSavedData().then(() => render());
