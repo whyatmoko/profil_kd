@@ -12,6 +12,7 @@
       <div class="sidebar-title">Data Quality</div>
       <nav>
         <a href="index.html">Summary</a>
+        <a href="progress.html">Progress</a>
         <a href="pkbu.html">Profiling PKBU</a>
         <a href="tk.html">Profiling TK Aktif</a>
         <a class="active" href="tk-na.html">Profiling TK NA</a>
@@ -120,8 +121,17 @@
               <h2>Pivot NOT GOOD per NPP</h2>
               <p id="nppPivotSubtitle">Beban elemen NOT GOOD per NPP.</p>
             </div>
-            <button id="downloadNppPivot" type="button">Download CSV</button>
+            <select id="nppSegmentFilter" aria-label="Filter segmen pivot NPP">
+              <option value="ALL">Semua Segmen</option>
+            </select>
+            <select id="nppViewModeFilter" aria-label="Mode tampilan pivot">
+              <option value="PEMBINA">Per Pembina</option>
+              <option value="NPP">Per NPP</option>
+            </select>
             <input id="nppSearchInput" type="search" placeholder="Cari NPP..." />
+            <button id="downloadNppPivot" class="icon-button" type="button" aria-label="Download CSV" title="Download CSV">
+              <span aria-hidden="true">&#8681;</span>
+            </button>
           </div>
           <div id="nppPivotPanel" class="npp-pivot-panel"></div>
         </article>

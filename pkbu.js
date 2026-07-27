@@ -24,6 +24,8 @@ const state = {
   pembinaPage: 1,
   pembinaPageSize: 25,
   nppSearch: "",
+  nppSegment: "ALL",
+  nppViewMode: "PEMBINA",
   nppPage: 1,
   nppPageSize: 50,
   search: "",
@@ -78,6 +80,8 @@ const els = {
   pembinaSearchInput: document.querySelector("#pembinaSearchInput"),
   nppPivotPanel: document.querySelector("#nppPivotPanel"),
   nppPivotSubtitle: document.querySelector("#nppPivotSubtitle"),
+  nppSegmentFilter: document.querySelector("#nppSegmentFilter"),
+  nppViewModeFilter: document.querySelector("#nppViewModeFilter"),
   nppSearchInput: document.querySelector("#nppSearchInput"),
   downloadNppPivot: document.querySelector("#downloadNppPivot"),
   filteredInsights: document.querySelector("#filteredInsights"),
@@ -910,6 +914,7 @@ function buildNppPivotData(rows) {
   const amountColumn = state.mapping.amount;
   const nppColumn = normalizedIssueColumns.npp;
   const segmentColumn = normalizedIssueColumns.segment;
+  const pembinaColumn = normalizedIssueColumns.pembina;
 
   if (!branchColumn || !elementColumn || !nppColumn || !rows.length) {
     return { elementNames: [], items: [] };
@@ -923,9 +928,20 @@ function buildNppPivotData(rows) {
     const branch = String(row[branchColumn] ?? "").trim() || "-";
     const segment = String(row[segmentColumn] ?? "").trim() || "-";
     const npp = String(row[nppColumn] ?? "").trim() || "-";
+    const pembina = String(row[pembinaColumn] ?? "").trim() || "-";
     const element = String(row[elementColumn] ?? "").trim() || "Kosong";
-    const key = `${branch}|${segment}|${npp}`;
-    const current = groups.get(key) ?? { branch, segment, npp, total: 0, elements: new Map() };
+    const key = state.nppViewMode === "NPP"
+      ? `${branch}|${segment}|${npp}|${pembina}`
+      : `${branch}|${segment}|${pembina}`;
+    const current = groups.get(key) ?? {
+      branch,
+      segment,
+      npp: state.nppViewMode === "NPP" ? npp : "-",
+      pembina,
+      total: 0,
+      elements: new Map(),
+    };
+    if (current.pembina === "-" && pembina !== "-") current.pembina = pembina;
     const amount = parseNumber(row[amountColumn]);
     current.total += amount;
     current.elements.set(element, (current.elements.get(element) ?? 0) + amount);
@@ -934,7 +950,8 @@ function buildNppPivotData(rows) {
 
   const search = state.nppSearch;
   const items = [...groups.values()]
-    .filter((item) => !search || item.npp.toLowerCase().includes(search))
+    .filter((item) => state.nppSegment === "ALL" || item.segment === state.nppSegment)
+    .filter((item) => !search || `${item.npp} ${item.pembina}`.toLowerCase().includes(search))
     .sort((a, b) => b.total - a.total || a.branch.localeCompare(b.branch, "id", { numeric: true }) || a.npp.localeCompare(b.npp, "id", { numeric: true }));
 
   return { elementNames, items };
@@ -947,13 +964,16 @@ function downloadNppPivotCsv() {
     return;
   }
 
-  const columns = ["Kode Cabang", "Segmen", "NPP", ...elementNames];
+  const includeNpp = state.nppViewMode === "NPP";
+  const columns = ["Kode Cabang", "Segmen", ...(includeNpp ? ["NPP"] : []), "Pembina", "Total", ...elementNames];
   const csv = [
     columns.map(csvEscape).join(","),
     ...items.map((item) => [
       item.branch,
       item.segment,
-      item.npp,
+      ...(includeNpp ? [item.npp] : []),
+      item.pembina,
+      item.total,
       ...elementNames.map((element) => item.elements.get(element) ?? 0),
     ].map(csvEscape).join(",")),
   ].join("\r\n");
@@ -963,9 +983,10 @@ function downloadNppPivotCsv() {
   const anchor = document.createElement("a");
   const branch = state.cabang === "ALL" ? "semua-cabang" : state.cabang.toLowerCase();
   const segment = state.segment === "ALL" ? "semua-segmen" : state.segment.toLowerCase();
+  const mode = includeNpp ? "per-npp" : "per-pembina";
   const subject = profilerConfig.subject.toLowerCase().replace(/\s+/g, "-");
   anchor.href = url;
-  anchor.download = `${subject}-${branch}-${segment}-pivot-npp.csv`;
+  anchor.download = `${subject}-${branch}-${segment}-pivot-${mode}.csv`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
@@ -1041,11 +1062,18 @@ function renderPrimaryQuality(rows) {
 function renderNppPivotPanel(rows) {
   if (!els.nppPivotPanel) return;
 
+  renderNppSegmentOptions(rows);
+  if (els.nppViewModeFilter) els.nppViewModeFilter.value = state.nppViewMode;
+  if (els.nppSearchInput) {
+    els.nppSearchInput.placeholder = state.nppViewMode === "NPP" ? "Cari NPP / pembina..." : "Cari pembina...";
+  }
   const { elementNames, items } = buildNppPivotData(rows);
+  const includeNpp = state.nppViewMode === "NPP";
+  const subjectLabel = includeNpp ? "NPP" : "pembina";
 
   if (!items.length && !state.nppSearch) {
-    els.nppPivotPanel.innerHTML = `<p class="empty">Tidak ada data NPP untuk filter aktif.</p>`;
-    if (els.nppPivotSubtitle) els.nppPivotSubtitle.textContent = "Beban elemen NOT GOOD per NPP.";
+    els.nppPivotPanel.innerHTML = `<p class="empty">Tidak ada data pivot untuk filter aktif.</p>`;
+    if (els.nppPivotSubtitle) els.nppPivotSubtitle.textContent = `Beban elemen NOT GOOD per ${subjectLabel}.`;
     if (els.downloadNppPivot) els.downloadNppPivot.disabled = true;
     return;
   }
@@ -1060,11 +1088,11 @@ function renderNppPivotPanel(rows) {
   const lastRow = Math.min(start + visible.length, items.length);
 
   if (els.nppPivotSubtitle) {
-    els.nppPivotSubtitle.textContent = `${fmtNumber.format(items.length)} NPP cocok; menampilkan ${fmtNumber.format(firstRow)}-${fmtNumber.format(lastRow)} dari ${fmtNumber.format(items.length)} NPP.`;
+    els.nppPivotSubtitle.textContent = `${fmtNumber.format(items.length)} ${subjectLabel} cocok; menampilkan ${fmtNumber.format(firstRow)}-${fmtNumber.format(lastRow)} dari ${fmtNumber.format(items.length)} ${subjectLabel}.`;
   }
 
   if (!visible.length) {
-    els.nppPivotPanel.innerHTML = `<p class="empty">Tidak ada NPP yang cocok dengan pencarian.</p>`;
+    els.nppPivotPanel.innerHTML = `<p class="empty">Tidak ada data yang cocok dengan pencarian.</p>`;
     if (els.downloadNppPivot) els.downloadNppPivot.disabled = true;
     return;
   }
@@ -1078,7 +1106,9 @@ function renderNppPivotPanel(rows) {
           <tr>
             <th>Kode Cabang</th>
             <th>Segmen</th>
-            <th>NPP</th>
+            ${includeNpp ? "<th>NPP</th>" : ""}
+            <th>Pembina</th>
+            <th class="num">Total</th>
             ${elementNames.map((element) => `<th class="num">${escapeHtml(element)}</th>`).join("")}
           </tr>
         </thead>
@@ -1087,7 +1117,9 @@ function renderNppPivotPanel(rows) {
             <tr>
               <td><strong>${escapeHtml(item.branch)}</strong></td>
               <td>${escapeHtml(item.segment)}</td>
-              <td>${escapeHtml(item.npp)}</td>
+              ${includeNpp ? `<td>${escapeHtml(item.npp)}</td>` : ""}
+              <td>${escapeHtml(item.pembina)}</td>
+              <td class="num"><strong>${fmtNumber.format(item.total)}</strong></td>
               ${elementNames.map((element) => {
                 const value = item.elements.get(element) ?? 0;
                 return `<td class="num">${value ? fmtNumber.format(value) : "-"}</td>`;
@@ -1111,6 +1143,21 @@ function renderNppPivotPanel(rows) {
     state.nppPage += 1;
     render();
   });
+}
+
+function renderNppSegmentOptions(rows) {
+  if (!els.nppSegmentFilter) return;
+  const segmentColumn = normalizedIssueColumns.segment;
+  const segments = [...new Set(rows.map((row) => String(row[segmentColumn] ?? "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "id", { numeric: true }));
+  if (state.nppSegment !== "ALL" && !segments.includes(state.nppSegment)) {
+    state.nppSegment = "ALL";
+  }
+  setOptions(
+    els.nppSegmentFilter,
+    [{ value: "ALL", label: "Semua Segmen" }, ...segments.map((segment) => ({ value: segment, label: segment }))],
+    state.nppSegment,
+  );
 }
 
 function renderPembinaPanel(rows) {
@@ -1200,7 +1247,7 @@ function renderEmpty() {
   if (els.pembinaPanel) els.pembinaPanel.innerHTML = `<p class="empty">Belum ada data pembina.</p>`;
   if (els.pembinaSubtitle) els.pembinaSubtitle.textContent = "Pembina dengan total elemen PKBU invalid terbanyak.";
   if (els.nppPivotPanel) els.nppPivotPanel.innerHTML = `<p class="empty">Belum ada data NPP.</p>`;
-  if (els.nppPivotSubtitle) els.nppPivotSubtitle.textContent = "Beban elemen NOT GOOD per NPP.";
+  if (els.nppPivotSubtitle) els.nppPivotSubtitle.textContent = "Beban elemen NOT GOOD per pembina.";
   if (els.downloadNppPivot) els.downloadNppPivot.disabled = true;
   els.filteredInsights.innerHTML = `<p class="empty">Belum ada data.</p>`;
   els.previewHead.innerHTML = "";
@@ -1215,6 +1262,8 @@ function renderEmpty() {
   els.kanwilFilter.disabled = true;
   setOptions(els.cabangFilter, [{ value: "ALL", label: "Semua Cabang" }], "ALL");
   if (els.segmentFilter) setOptions(els.segmentFilter, [{ value: "ALL", label: "Semua Segmen" }], "ALL");
+  if (els.nppSegmentFilter) setOptions(els.nppSegmentFilter, [{ value: "ALL", label: "Semua Segmen" }], "ALL");
+  if (els.nppViewModeFilter) els.nppViewModeFilter.value = "PEMBINA";
   setOptions(els.elemenFilter, [{ value: "ALL", label: "Semua Elemen" }], "ALL");
   setOptions(els.extraColumnFilter, [{ value: "NONE", label: "Tidak ada" }], "NONE");
   setOptions(els.extraValueFilter, [{ value: "ALL", label: "Semua Nilai" }], "ALL");
@@ -1483,9 +1532,13 @@ async function handleFiles(files) {
     state.previewElement = "ALL";
     state.search = "";
     state.nppSearch = "";
+    state.nppSegment = "ALL";
+    state.nppViewMode = "PEMBINA";
     state.nppPage = 1;
     els.searchInput.value = "";
     if (els.nppSearchInput) els.nppSearchInput.value = "";
+    if (els.nppSegmentFilter) els.nppSegmentFilter.value = "ALL";
+    if (els.nppViewModeFilter) els.nppViewModeFilter.value = "PEMBINA";
     els.sourceNote.textContent = qualityData
       ? `${state.fileName}; ${fmtNumber.format(qualityData.sourceRows)} baris sumber; ${fmtNumber.format(rows.length)} temuan kualitas dari ${fmtNumber.format(qualityData.issueColumns)} ${qualityData.issueMode}. Data lama sudah diganti.`
       : `${state.fileName}; ${fmtNumber.format(rows.length)} baris. Kolom nominal: ${mapping.amount}. Data lama sudah diganti.`;
@@ -1509,11 +1562,15 @@ function resetFilters() {
   state.pembinaSearch = "";
   state.pembinaPage = 1;
   state.nppSearch = "";
+  state.nppSegment = "ALL";
+  state.nppViewMode = "PEMBINA";
   state.nppPage = 1;
   state.search = "";
   els.searchInput.value = "";
   if (els.pembinaSearchInput) els.pembinaSearchInput.value = "";
   if (els.nppSearchInput) els.nppSearchInput.value = "";
+  if (els.nppSegmentFilter) els.nppSegmentFilter.value = "ALL";
+  if (els.nppViewModeFilter) els.nppViewModeFilter.value = "PEMBINA";
   render();
 }
 
@@ -1531,11 +1588,15 @@ async function clearData() {
   state.pembinaSearch = "";
   state.pembinaPage = 1;
   state.nppSearch = "";
+  state.nppSegment = "ALL";
+  state.nppViewMode = "PEMBINA";
   state.nppPage = 1;
   els.fileInput.value = "";
   els.searchInput.value = "";
   if (els.pembinaSearchInput) els.pembinaSearchInput.value = "";
   if (els.nppSearchInput) els.nppSearchInput.value = "";
+  if (els.nppSegmentFilter) els.nppSegmentFilter.value = "ALL";
+  if (els.nppViewModeFilter) els.nppViewModeFilter.value = "PEMBINA";
   els.sourceNote.textContent = profilerConfig.emptySourceText;
   await idbDelete(STORAGE_KEY).catch(() => {});
   renderUploadMeta();
@@ -1634,6 +1695,16 @@ function bindEvents() {
   });
   els.nppSearchInput?.addEventListener("input", (event) => {
     state.nppSearch = event.target.value.trim().toLowerCase();
+    state.nppPage = 1;
+    render();
+  });
+  els.nppSegmentFilter?.addEventListener("change", (event) => {
+    state.nppSegment = event.target.value;
+    state.nppPage = 1;
+    render();
+  });
+  els.nppViewModeFilter?.addEventListener("change", (event) => {
+    state.nppViewMode = event.target.value;
     state.nppPage = 1;
     render();
   });
