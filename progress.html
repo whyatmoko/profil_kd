@@ -10,11 +10,13 @@
     <aside class="sidebar" aria-label="Menu utama">
       <div class="sidebar-title">Data Quality</div>
       <nav>
-        <a href="index.html">Summary</a>
-        <a class="active" href="progress.html">Progress</a>
-        <a href="pkbu.html">Profiling PKBU</a>
-        <a href="tk.html">Profiling TK Aktif</a>
-        <a href="tk-na.html">Profiling TK NA</a>
+        <a href="index.html"><span class="nav-icon">▦</span>Summary</a>
+        <a class="active" href="progress.html"><span class="nav-icon">↗</span>IGI : Kualitas Data</a>
+        <a href="kpi-nik.html"><span class="nav-icon">−</span>KPI : NIK Invalid Pengurang</a>
+        <div class="nav-group">Profiling</div>
+        <a href="pkbu.html"><span class="nav-icon">◈</span>PKBU</a>
+        <a href="tk.html"><span class="nav-icon">●</span>TK Aktif</a>
+        <a href="tk-na.html"><span class="nav-icon">○</span>TK NA</a>
       </nav>
     </aside>
 
@@ -109,6 +111,7 @@
     </main>
 
     <div id="toast" class="toast" hidden></div>
+    <script src="sidebar.js"></script>
     <script src="progress.js"></script>
   </body>
 </html>

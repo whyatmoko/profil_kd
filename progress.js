@@ -431,7 +431,8 @@ function renderTrend(selectedMetrics) {
   const series = state.metric === "TOTAL_SCORE"
     ? [{
       metric: { key: "total_score", label: "Total Score" },
-      chart: buildLineChart(rows.map((row) => parseNumber(row.nilai)), 100),
+      maxValue: getTotalMaxScore(targetOffice),
+      chart: null,
       values: rows.map((row) => parseNumber(row.nilai)),
       colorIndex: 1,
       first: parseNumber(first.nilai),
@@ -440,12 +441,13 @@ function renderTrend(selectedMetrics) {
       score: parseNumber(last.nilai),
     }]
     : selectedMetrics.map((metric, index) => {
-    const values = rows.map((row) => parseNumber(row[metric.percent]));
-    const chart = buildLineChart(values, 100);
+    const maxValue = getMaxScore(metric.key, targetOffice);
+    const values = rows.map((row) => parseNumber(row[metric.score]));
     const finalRow = rows.at(-1);
     return {
       metric,
-      chart,
+      maxValue,
+      chart: null,
       values,
       colorIndex: index + 1,
       first: values[0] ?? 0,
@@ -453,6 +455,10 @@ function renderTrend(selectedMetrics) {
       burden: parseNumber(finalRow[metric.burden]),
       score: parseNumber(finalRow[metric.score]),
     };
+  });
+  const axisMax = Math.max(1, ...series.map((item) => item.maxValue));
+  series.forEach((item) => {
+    item.chart = buildLineChart(item.values, axisMax);
   });
   els.trendCards.innerHTML = `
     <section class="trend-card combined">
@@ -463,14 +469,14 @@ function renderTrend(selectedMetrics) {
               <line class="grid" x1="52" y1="26" x2="52" y2="206"></line>
               <line class="grid" x1="52" y1="206" x2="688" y2="206"></line>
               <line class="grid muted" x1="52" y1="116" x2="688" y2="116"></line>
-              <text x="12" y="31">100%</text>
-              <text x="20" y="120">50%</text>
-              <text x="28" y="210">0%</text>
+              <text x="20" y="31">${escapeHtml(formatPointAxis(axisMax))}</text>
+              <text x="20" y="120">${escapeHtml(formatPointAxis(axisMax / 2))}</text>
+              <text x="34" y="210">0</text>
               ${series.map((item) => `
                 <polyline class="line line-${item.colorIndex}" points="${item.chart.polyline}"></polyline>
                 ${item.chart.points.map((point, pointIndex) => `
                   <circle class="dot dot-${item.colorIndex}" cx="${point.x}" cy="${point.y}" r="3">
-                    <title>${escapeHtml(item.metric.label)} | ${escapeHtml(trendDateLabel(rows[pointIndex].tgl_proses, currentTrendMonth))}: ${fmtDecimal.format(item.values[pointIndex])}%</title>
+                    <title>${escapeHtml(item.metric.label)} | ${escapeHtml(trendDateLabel(rows[pointIndex].tgl_proses, currentTrendMonth))}: ${fmtDecimal.format(item.values[pointIndex])} poin</title>
                   </circle>
                   <text class="value-label value-label-${item.colorIndex}" x="${point.x}" y="${point.y - 9}" text-anchor="middle">${escapeHtml(compactValueLabel(item.values[pointIndex]))}</text>
                   ${pointIndex > 0 ? `
@@ -495,6 +501,10 @@ function renderTrend(selectedMetrics) {
 function formatGrowthLabel(delta) {
   if (Math.abs(delta) < 0.005) return "0";
   return `${delta > 0 ? "+" : ""}${fmtDecimal.format(delta)}`;
+}
+
+function formatPointAxis(value) {
+  return fmtDecimal.format(value);
 }
 
 function growthLabelClass(delta) {
