@@ -8,6 +8,7 @@ const sidebarItems = [
   { href: "pkbu.html", icon: "building", label: "PKBU", group: "profiling" },
   { href: "tk.html", icon: "userCheck", label: "TK Aktif", group: "profiling" },
   { href: "tk-na.html", icon: "userMinus", label: "TK NA", group: "profiling" },
+  { href: "tk-pemadanan.html", icon: "match", label: "TK Pemadanan", group: "profiling" },
 ];
 
 if (sidebar) {
@@ -35,6 +36,7 @@ function iconSvg(name) {
     building: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V5h10v15"></path><path d="M15 9h4v11"></path><path d="M8 8h4M8 12h4M8 16h4"></path></svg>`,
     userCheck: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"></circle><path d="M3 20c1-4 4-6 8-6"></path><path d="M15 17l2 2 4-5"></path></svg>`,
     userMinus: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"></circle><path d="M3 20c1-4 4-6 8-6"></path><path d="M15 17h6"></path></svg>`,
+    match: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10"></path><path d="M7 12h6"></path><path d="M7 17h4"></path><path d="M15 16l2 2 4-5"></path><rect x="4" y="4" width="16" height="16" rx="3"></rect></svg>`,
   };
   return icons[name] ?? icons.summary;
 }

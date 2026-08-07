@@ -32,6 +32,8 @@ const els = {
   trendSubtitle: document.querySelector("#nikTrendSubtitle"),
   trendPanel: document.querySelector("#nikTrendPanel"),
   trendResume: document.querySelector("#nikTrendResume"),
+  movementSubtitle: document.querySelector("#nikMovementSubtitle"),
+  movementPanel: document.querySelector("#nikMovementPanel"),
   insightSubtitle: document.querySelector("#nikInsightSubtitle"),
   insightPanel: document.querySelector("#nikInsightPanel"),
   tableSubtitle: document.querySelector("#nikTableSubtitle"),
@@ -181,6 +183,7 @@ function render() {
 
   renderTrend(subjectRows);
   renderTrendResume(filteredTableRows);
+  renderMovementAnalysis(latestRows);
   renderInsight(filteredTableRows, latestSubject, progress);
   renderTable(filteredTableRows);
 }
@@ -372,6 +375,149 @@ function renderProgressTag(progress) {
 
 function progressSortValue(progress) {
   return progress === null ? -Infinity : progress;
+}
+
+function renderMovementAnalysis(latestRows) {
+  if (!els.movementPanel) return;
+  const rows = movementBaseRows(latestRows);
+  const officeMovements = buildOfficeMovementRows(rows);
+  const previousDate = previousUpdateDate(state.date);
+  if (!rows.length || !previousDate) {
+    els.movementSubtitle.textContent = "Belum ada data pembanding.";
+    els.movementPanel.innerHTML = `<p class="empty">Belum cukup data untuk analisis pergerakan.</p>`;
+    return;
+  }
+  const latestDate = state.date;
+  const segmentRows = buildSegmentMovement(officeMovements);
+  const topIncrease = officeMovements
+    .filter((item) => item.delta > 0)
+    .sort((a, b) => b.delta - a.delta)
+    .slice(0, 5);
+  const totalDelta = officeMovements.reduce((sum, item) => sum + item.delta, 0);
+  const newDelta = officeMovements.reduce((sum, item) => sum + item.newDelta, 0);
+  const oldDelta = officeMovements.reduce((sum, item) => sum + item.oldDelta, 0);
+  const scoreDelta = officeMovements.reduce((sum, item) => sum + item.valueDelta, 0);
+  const top = topIncrease[0];
+  const dominantSegment = segmentRows.length ? [...segmentRows].sort((a, b) => b.delta - a.delta)[0] : null;
+  const cause = totalDelta > 0
+    ? `KPI memburuk karena beban naik <strong>${formatSigned(totalDelta)}</strong>. Pendorong utama: <strong>${escapeHtml(dominantSegment?.segment ?? "-")}</strong>${top ? `, terutama <strong>${escapeHtml(top.code)} - ${escapeHtml(top.name)}</strong> dari penambahan TK Aktif sekitar <strong>${formatSigned(top.activeTkDelta)}</strong>` : ""}.`
+    : totalDelta < 0
+      ? `KPI membaik karena beban turun <strong>${formatSigned(totalDelta)}</strong>. Tetap jaga kantor yang masih punya kenaikan agar tidak menahan progres.`
+      : "Beban total relatif tetap dibanding update sebelumnya.";
+
+  els.movementSubtitle.textContent = `${previousDate} ke ${latestDate}; mengikuti filter Cabang, Segmen, Jenis TK, Mode Tabel, dan pilihan kantor.`;
+  els.movementPanel.innerHTML = `
+    <section class="movement-summary">
+      <div>
+        <span>Perubahan Beban</span>
+        <strong class="${totalDelta > 0 ? "bad-text" : totalDelta < 0 ? "good-text" : ""}">${escapeHtml(formatSigned(totalDelta))}</strong>
+      </div>
+      <div>
+        <span>TK Baru</span>
+        <strong class="${newDelta > 0 ? "bad-text" : newDelta < 0 ? "good-text" : ""}">${escapeHtml(formatSigned(newDelta))}</strong>
+      </div>
+      <div>
+        <span>TK Lama</span>
+        <strong class="${oldDelta > 0 ? "bad-text" : oldDelta < 0 ? "good-text" : ""}">${escapeHtml(formatSigned(oldDelta))}</strong>
+      </div>
+      <div>
+        <span>Nilai KPI</span>
+        <strong class="${scoreDelta > 0 ? "good-text" : scoreDelta < 0 ? "bad-text" : ""}">${escapeHtml(formatSigned(scoreDelta))}</strong>
+      </div>
+    </section>
+    <p class="movement-cause">${cause}</p>
+    <div class="movement-grid">
+      <section>
+        <h3>Segmen</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Segmen</th>
+              <th class="num">Beban</th>
+              <th class="num">+/-</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${segmentRows.map((item) => `
+              <tr>
+                <td><strong>${escapeHtml(item.segment)}</strong></td>
+                <td class="num">${fmtNumber.format(item.latest)}</td>
+                <td class="num">${renderProgressTag(item.delta)}</td>
+              </tr>
+            `).join("") || `<tr><td class="empty" colspan="3">Tidak ada data.</td></tr>`}
+          </tbody>
+        </table>
+      </section>
+      <section>
+        <h3>Penyumbang Kenaikan Terbesar</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Kode</th>
+              <th>Nama</th>
+              <th>Segmen</th>
+              <th class="num">+/-</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${topIncrease.map((item) => `
+              <tr>
+                <td><strong>${escapeHtml(item.code)}</strong></td>
+                <td>${escapeHtml(item.name)}</td>
+                <td>${escapeHtml(item.segment)}</td>
+                <td class="num">${renderProgressTag(item.delta)}</td>
+              </tr>
+            `).join("") || `<tr><td class="empty" colspan="4">Tidak ada kenaikan beban.</td></tr>`}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  `;
+}
+
+function movementBaseRows(latestRows) {
+  return latestRows
+    .filter((row) => readCode(row) !== "905")
+    .filter(matchesSegment)
+    .filter((row) => state.officeMode === "ALL" || matchesOfficeMode(readCode(row)))
+    .filter((row) => state.office === "ALL" || readCode(row) === state.office)
+    .filter((row) => !state.tableOffices.length || state.tableOffices.includes(readCode(row)));
+}
+
+function buildOfficeMovementRows(rows) {
+  return rows.map((row) => {
+    const previous = getPreviousOfficeRow(row);
+    return {
+      code: readCode(row),
+      name: readName(row),
+      segment: segmentFromRow(row) || "-",
+      latest: rawInvalid(row),
+      previous: previous ? rawInvalid(previous) : 0,
+      delta: previous ? rawInvalid(row) - rawInvalid(previous) : rawInvalid(row),
+      newDelta: previous ? newInvalid(row) - newInvalid(previous) : newInvalid(row),
+      oldDelta: previous ? oldInvalid(row) - oldInvalid(previous) : oldInvalid(row),
+      valueDelta: previous ? displayValue(row) - displayValue(previous) : displayValue(row),
+      activeTkDelta: previous ? activeTk(row) - activeTk(previous) : activeTk(row),
+    };
+  });
+}
+
+function buildSegmentMovement(items) {
+  const grouped = new Map();
+  for (const item of items) {
+    const current = grouped.get(item.segment) ?? { segment: item.segment, latest: 0, previous: 0, delta: 0 };
+    current.latest += item.latest;
+    current.previous += item.previous;
+    current.delta += item.delta;
+    grouped.set(item.segment, current);
+  }
+  return [...grouped.values()].sort((a, b) => b.delta - a.delta);
+}
+
+function previousUpdateDate(dateValue) {
+  return uniqueValues(state.rows, state.columns.date)
+    .filter((date) => parseDate(date) < parseDate(dateValue))
+    .sort(compareDateDesc)[0] ?? "";
 }
 
 function renderInsight(rows, latestSubject, progress) {
@@ -616,6 +762,11 @@ function newInvalid(row) {
 
 function oldInvalid(row) {
   return Math.max(0, totalInvalidAll(row) - newInvalid(row));
+}
+
+function activeTk(row) {
+  if (!row) return 0;
+  return parseNumber(row.tk_aktif ?? row["TK_AKTIF"] ?? row["tk aktif"]);
 }
 
 function displayValue(row) {

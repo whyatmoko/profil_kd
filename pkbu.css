@@ -532,7 +532,7 @@ button:hover {
 
 .kpis {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 14px;
 }
 
@@ -1899,6 +1899,93 @@ th {
   color: var(--danger);
 }
 
+.movement-analysis {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 16px;
+}
+
+.movement-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.movement-summary div {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #dbe6f3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.movement-summary span,
+.movement-summary strong {
+  display: block;
+}
+
+.movement-summary span {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 900;
+}
+
+.movement-summary strong {
+  margin-top: 3px;
+  color: var(--navy);
+  font-size: 17px;
+  line-height: 1.1;
+}
+
+.movement-cause {
+  padding: 10px 12px;
+  border-left: 4px solid var(--accent-2);
+  border-radius: 8px;
+  background: var(--blue-soft);
+  color: #344054;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.movement-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.45fr) minmax(420px, 1fr);
+  gap: 10px;
+}
+
+.movement-grid section {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #dbe6f3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.movement-grid h3 {
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid #dbe6f3;
+  background: var(--surface-soft);
+  color: var(--navy);
+  font-size: 11.5px;
+}
+
+.movement-grid table {
+  table-layout: fixed;
+  font-size: 11px;
+}
+
+.pemadanan-pembina-wrap {
+  max-height: 430px;
+  margin: 12px 16px 16px;
+  border: 1px solid #dbe6f3;
+  border-radius: 8px;
+}
+
+.pemadanan-pembina-wrap table {
+  min-width: 720px;
+}
+
 .progress-table-wrap {
   max-height: 560px;
 }
@@ -2458,6 +2545,11 @@ th {
   }
 
   .progress-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .movement-summary,
+  .movement-grid {
     grid-template-columns: 1fr;
   }
 
