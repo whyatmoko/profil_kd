@@ -525,6 +525,7 @@ function renderQuickWinInsight(currentRow, selectedMetrics) {
 }
 
 function renderRegionalQuickWin(activeMetrics) {
+  const movementInsight = renderScoreMovementInsight(activeMetrics);
   const rows = state.igiRows
     .filter((row) => row.tgl_proses === state.date && row.kode_kantor !== "905")
     .map((row) => {
@@ -556,6 +557,7 @@ function renderRegionalQuickWin(activeMetrics) {
         <h3>Insight Quick Win</h3>
         <span>Wilayah 905</span>
       </div>
+      ${movementInsight}
       <div class="quickwin-priority">
         <b>Kerjakan dulu:</b>
         <span>${escapeHtml(rows[0].row.kode_kantor)} - ${escapeHtml(rows[0].row.nama_kantor)} pada ${escapeHtml(rows[0].best.metric.label)}. Tutup ${fmtNumber.format(rows[0].best.burden)} sisa beban agar nilai parameter bisa naik dari ${fmtDecimal.format(rows[0].best.score)} menjadi ${fmtNumber.format(rows[0].best.maxScore)}.</span>
@@ -574,6 +576,7 @@ function renderRegionalQuickWin(activeMetrics) {
 }
 
 function renderLocalQuickWin(currentRow, activeMetrics) {
+  const movementInsight = renderScoreMovementInsight(activeMetrics, currentRow);
   const previousRow = getPreviousIgiRow(currentRow);
   const opportunities = activeMetrics
     .map((metric) => buildOpportunity(currentRow, metric, previousRow))
@@ -587,6 +590,7 @@ function renderLocalQuickWin(currentRow, activeMetrics) {
         <h3>Insight Quick Win</h3>
         <span>${escapeHtml(currentRow.kode_kantor)} - ${escapeHtml(currentRow.nama_kantor)}</span>
       </div>
+      ${movementInsight}
       <div class="quickwin-priority">
         <b>Kerjakan dulu:</b>
         <span>${escapeHtml(topItems[0].metric.label)}. ${escapeHtml(topItems[0].burdenText)} agar nilai parameter bisa naik dari ${fmtDecimal.format(topItems[0].score)} menjadi ${fmtNumber.format(topItems[0].maxScore)}.</span>
@@ -602,6 +606,182 @@ function renderLocalQuickWin(currentRow, activeMetrics) {
       </ol>
     </div>
   `;
+}
+
+function renderScoreMovementInsight(activeMetrics, currentRow = null) {
+  const contextRow = currentRow ?? state.igiRows.find((row) => row.tgl_proses === state.date && row.kode_kantor === "905");
+  const previousRow = contextRow ? getPreviousIgiRow(contextRow) : null;
+  if (!contextRow || !previousRow) {
+    return `
+      <div class="score-decline-insight neutral">
+        <h4>Analisis Pergerakan Score</h4>
+        <p>Belum ada update pembanding untuk membaca penyebab perubahan score.</p>
+      </div>
+    `;
+  }
+  const items = buildScoreMovementItems(contextRow, previousRow, activeMetrics);
+  const totalScoreDelta = parseNumber(contextRow.nilai) - parseNumber(previousRow.nilai);
+  const totalBurdenDelta = sumMetrics(contextRow, activeMetrics, "burden") - sumMetrics(previousRow, activeMetrics, "burden");
+  const totalScore = parseNumber(contextRow.nilai);
+  const maxScore = getTotalMaxScore(contextRow.kode_kantor);
+  const scope = `${contextRow.kode_kantor} - ${contextRow.nama_kantor}`;
+  const tone = totalScoreDelta > 0.005 ? "good" : totalScoreDelta < -0.005 ? "bad" : "neutral";
+  const driver = pickScoreMovementDriver(items, totalScoreDelta);
+  const mainDriver = driver ? buildMainMovementDriverText(driver, currentRow) : "belum ada parameter dominan yang terbaca.";
+  const movementText = totalScoreDelta < -0.005
+    ? "terjadi penurunan score"
+    : totalScoreDelta > 0.005
+      ? "terjadi kenaikan score"
+      : "score relatif tetap";
+  const burdenText = totalBurdenDelta < 0
+    ? `terjadi penurunan beban total sebanyak <strong>${fmtNumber.format(Math.abs(totalBurdenDelta))}</strong>`
+    : totalBurdenDelta > 0
+      ? `terjadi kenaikan beban total sebanyak <strong>${fmtNumber.format(totalBurdenDelta)}</strong>`
+      : "beban total tidak berubah";
+  const otherItems = items.filter((item) => item !== driver);
+  return `
+    <div class="score-decline-insight ${tone}">
+      <h4>Analisis Pergerakan Score</h4>
+      <p>
+        Progres dari tanggal <strong>${escapeHtml(formatFullDate(previousRow.tgl_proses))}</strong>
+        s.d. <strong>${escapeHtml(formatFullDate(contextRow.tgl_proses))}</strong>
+        (<strong>${fmtNumber.format(countBusinessDays(previousRow.tgl_proses, contextRow.tgl_proses))} hari kerja</strong>),
+        ${burdenText}, sehingga ${movementText} menjadi
+        <strong>${fmtDecimal.format(totalScore)} dari total ${fmtNumber.format(maxScore)} poin</strong>
+        (${formatSignedDecimal(totalScoreDelta)} poin).
+      </p>
+      <p>
+        ${mainDriver}
+      </p>
+      <p>
+        ${renderOtherParameterMovementText(otherItems)}
+      </p>
+      <ol class="score-decline-list">
+        ${items.map((item) => `
+          <li>
+            <b>${escapeHtml(item.metric.label)}</b>
+            <span>nilai ${fmtDecimal.format(item.previousScore)} → ${fmtDecimal.format(item.score)}
+            (<strong>${formatSignedDecimal(item.scoreDelta)} poin</strong>), beban ${fmtNumber.format(item.previousBurden)} → ${fmtNumber.format(item.burden)}
+            (<strong>${formatSignedInteger(item.burdenDelta)}</strong>).</span>
+            ${renderMetricBranchDrivers(item.metric, currentRow)}
+          </li>
+        `).join("")}
+      </ol>
+    </div>
+  `;
+}
+
+function buildMainMovementDriverText(driver, currentRow = null) {
+  const branchDriver = currentRow && currentRow.kode_kantor !== "905"
+    ? null
+    : pickMetricBranchDriver(driver.metric, driver.burdenDelta);
+  const movement = driver.burdenDelta < 0 ? "penurunan" : driver.burdenDelta > 0 ? "kenaikan" : "perubahan";
+  const branchClass = branchDriver?.delta < 0 ? "burden-down" : branchDriver?.delta > 0 ? "burden-up" : "neutral";
+  const branchText = branchDriver
+    ? ` di cabang <strong class="${branchClass}">${escapeHtml(branchDriver.code)} - ${escapeHtml(branchDriver.name)}</strong> dengan ${branchDriver.delta < 0 ? "penurunan" : "kenaikan"} beban sebanyak <strong class="${branchClass}">${formatSignedInteger(branchDriver.delta)}</strong>`
+    : "";
+  return `
+    ${driver.scoreDelta < -0.005 ? "Penurunan" : driver.scoreDelta > 0.005 ? "Kenaikan" : "Pergerakan"} terbanyak ada pada parameter
+    <strong>${escapeHtml(driver.metric.label)}</strong>${branchText}. Secara konsol, parameter ini mengalami
+    ${movement} beban <strong>${formatSignedInteger(driver.burdenDelta)}</strong> dan perubahan poin
+    <strong>${formatSignedDecimal(driver.scoreDelta)}</strong>, sehingga score parameter menjadi
+    <strong>${fmtDecimal.format(driver.score)}</strong>.
+  `;
+}
+
+function renderOtherParameterMovementText(items) {
+  if (!items.length) return "Tidak ada parameter lain pada filter ini.";
+  const parts = items.map((item) => {
+    const direction = item.scoreDelta < -0.005
+      ? "turun"
+      : item.scoreDelta > 0.005
+        ? "naik"
+        : "tetap";
+    return `<strong>${escapeHtml(item.metric.label)}</strong> ${direction} ${formatSignedDecimal(item.scoreDelta)} poin dengan beban ${formatSignedInteger(item.burdenDelta)}`;
+  });
+  return `Untuk parameter lain, ${parts.join("; ")}.`;
+}
+
+function pickMetricBranchDriver(metric, directionValue) {
+  const drivers = buildMetricBranchDrivers(metric);
+  if (!drivers.length) return null;
+  if (directionValue < 0) return [...drivers].reverse().find((item) => item.delta < 0) ?? null;
+  if (directionValue > 0) return drivers.find((item) => item.delta > 0) ?? null;
+  return drivers[0] ?? null;
+}
+
+function renderMetricBranchDrivers(metric, currentRow = null) {
+  if (currentRow && currentRow.kode_kantor !== "905") return "";
+  const drivers = buildMetricBranchDrivers(metric);
+  const increase = drivers.find((item) => item.delta > 0);
+  const decrease = [...drivers].reverse().find((item) => item.delta < 0);
+  if (!increase && !decrease) {
+    return `<small class="branch-driver neutral">Tidak ada perubahan beban cabang yang signifikan.</small>`;
+  }
+  return `
+    <small class="branch-driver">
+      ${increase ? `Beban naik terbesar: <strong class="burden-up">${escapeHtml(increase.code)} - ${escapeHtml(increase.name)}</strong> <strong class="burden-up">${formatSignedInteger(increase.delta)}</strong>.` : "Tidak ada cabang yang bebannya naik."}
+      ${decrease ? ` Beban turun terbesar: <strong class="burden-down">${escapeHtml(decrease.code)} - ${escapeHtml(decrease.name)}</strong> <strong class="burden-down">${formatSignedInteger(decrease.delta)}</strong>.` : " Tidak ada cabang yang bebannya turun."}
+    </small>
+  `;
+}
+
+function buildMetricBranchDrivers(metric) {
+  return state.igiRows
+    .filter((row) => row.tgl_proses === state.date && row.kode_kantor !== "905")
+    .filter(matchesOfficeMode)
+    .filter((row) => !state.search || `${row.kode_kantor} ${row.nama_kantor}`.toLowerCase().includes(state.search))
+    .map((row) => {
+      const previousRow = getPreviousIgiRow(row);
+      return {
+        code: row.kode_kantor,
+        name: row.nama_kantor,
+        delta: previousRow ? parseNumber(row[metric.burden]) - parseNumber(previousRow[metric.burden]) : 0,
+      };
+    })
+    .filter((item) => item.delta !== 0)
+    .sort((a, b) => b.delta - a.delta);
+}
+
+function buildScoreMovementItems(row, previousRow, activeMetrics) {
+  return activeMetrics.map((metric) => {
+    const score = parseNumber(row[metric.score]);
+    const previousScore = parseNumber(previousRow[metric.score]);
+    const burden = parseNumber(row[metric.burden]);
+    const previousBurden = parseNumber(previousRow[metric.burden]);
+    return {
+      metric,
+      score,
+      previousScore,
+      scoreDelta: score - previousScore,
+      burden,
+      previousBurden,
+      burdenDelta: burden - previousBurden,
+    };
+  }).sort((a, b) => Math.abs(b.scoreDelta) - Math.abs(a.scoreDelta) || Math.abs(b.burdenDelta) - Math.abs(a.burdenDelta));
+}
+
+function pickScoreMovementDriver(items, totalScoreDelta) {
+  if (!items.length) return null;
+  if (totalScoreDelta < -0.005) {
+    return [...items].sort((a, b) => a.scoreDelta - b.scoreDelta || b.burdenDelta - a.burdenDelta)[0];
+  }
+  if (totalScoreDelta > 0.005) {
+    return [...items].sort((a, b) => b.scoreDelta - a.scoreDelta || a.burdenDelta - b.burdenDelta)[0];
+  }
+  return items[0];
+}
+
+function formatSignedInteger(value) {
+  const number = Number(value) || 0;
+  if (number === 0) return "0";
+  return `${number > 0 ? "+" : "-"}${fmtNumber.format(Math.abs(number))}`;
+}
+
+function formatSignedDecimal(value) {
+  const number = Number(value) || 0;
+  if (Math.abs(number) < 0.005) return "0";
+  return `${number > 0 ? "+" : ""}${fmtDecimal.format(number)}`;
 }
 
 function buildOpportunity(row, metric, previousRow = null) {
@@ -1027,6 +1207,30 @@ function simpleDate(value) {
   return `${match[1].padStart(2, "0")}/${match[2].padStart(2, "0")}`;
 }
 
+function formatFullDate(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (!match) return text;
+  return `${match[1].padStart(2, "0")}-${match[2].padStart(2, "0")}-${match[3]}`;
+}
+
+function countBusinessDays(startValue, endValue) {
+  const startTime = parseDate(startValue);
+  const endTime = parseDate(endValue);
+  if (!startTime || !endTime) return 0;
+  const start = new Date(Math.min(startTime, endTime));
+  const end = new Date(Math.max(startTime, endTime));
+  let count = 0;
+  const cursor = new Date(start);
+  cursor.setDate(cursor.getDate() + 1);
+  while (cursor <= end) {
+    const day = cursor.getDay();
+    if (day !== 0 && day !== 6) count += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return count;
+}
+
 function trendDateLabel(value, currentTrendMonth) {
   const text = String(value ?? "").trim();
   const match = text.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
@@ -1039,7 +1243,7 @@ function trendDateLabel(value, currentTrendMonth) {
 
 function compactValueLabel(value) {
   const number = parseNumber(value);
-  return `${fmtDecimal.format(number)}%`;
+  return fmtDecimal.format(number);
 }
 
 function compactTrendRows(rows) {
