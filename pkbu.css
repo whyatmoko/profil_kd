@@ -2062,6 +2062,28 @@ th {
   line-height: 1.45;
 }
 
+.movement-narrative {
+  margin: 0;
+}
+
+.movement-narrative strong.burden-up {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--red-soft);
+  color: var(--danger);
+}
+
+.movement-narrative strong.burden-down {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--accent);
+}
+
 .movement-grid {
   display: grid;
   grid-template-columns: minmax(220px, 0.45fr) minmax(420px, 1fr);

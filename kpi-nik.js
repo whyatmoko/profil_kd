@@ -396,17 +396,27 @@ function renderMovementAnalysis(latestRows) {
   const totalDelta = officeMovements.reduce((sum, item) => sum + item.delta, 0);
   const newDelta = officeMovements.reduce((sum, item) => sum + item.newDelta, 0);
   const oldDelta = officeMovements.reduce((sum, item) => sum + item.oldDelta, 0);
-  const scoreDelta = officeMovements.reduce((sum, item) => sum + item.valueDelta, 0);
-  const top = topIncrease[0];
-  const dominantSegment = segmentRows.length ? [...segmentRows].sort((a, b) => b.delta - a.delta)[0] : null;
-  const cause = totalDelta > 0
-    ? `KPI memburuk karena beban naik <strong>${formatSigned(totalDelta)}</strong>. Pendorong utama: <strong>${escapeHtml(dominantSegment?.segment ?? "-")}</strong>${top ? `, terutama <strong>${escapeHtml(top.code)} - ${escapeHtml(top.name)}</strong> dari penambahan TK Aktif sekitar <strong>${formatSigned(top.activeTkDelta)}</strong>` : ""}.`
-    : totalDelta < 0
-      ? `KPI membaik karena beban turun <strong>${formatSigned(totalDelta)}</strong>. Tetap jaga kantor yang masih punya kenaikan agar tidak menahan progres.`
-      : "Beban total relatif tetap dibanding update sebelumnya.";
+  const subjectRows = subjectTrendRows();
+  const currentSubject = subjectRows.at(-1);
+  const previousSubject = subjectRows.at(-2);
+  const scoreDelta = currentSubject && previousSubject
+    ? displayValue(currentSubject) - displayValue(previousSubject)
+    : officeMovements.reduce((sum, item) => sum + item.valueDelta, 0);
+  const currentPenalty = currentSubject
+    ? displayValue(currentSubject)
+    : officeMovements.reduce((sum, item) => sum + item.value, 0);
+  const movementNarrative = buildKpiMovementNarrative({
+    previousDate,
+    latestDate,
+    totalDelta,
+    scoreDelta,
+    currentPenalty,
+    driver: pickKpiMovementDriver(officeMovements, totalDelta),
+  });
 
   els.movementSubtitle.textContent = `${previousDate} ke ${latestDate}; mengikuti filter Cabang, Segmen, Jenis TK, Mode Tabel, dan pilihan kantor.`;
   els.movementPanel.innerHTML = `
+    <p class="movement-cause movement-narrative">${movementNarrative}</p>
     <section class="movement-summary">
       <div>
         <span>Perubahan Beban</span>
@@ -425,7 +435,6 @@ function renderMovementAnalysis(latestRows) {
         <strong class="${scoreDelta > 0 ? "good-text" : scoreDelta < 0 ? "bad-text" : ""}">${escapeHtml(formatSigned(scoreDelta))}</strong>
       </div>
     </section>
-    <p class="movement-cause">${cause}</p>
     <div class="movement-grid">
       <section>
         <h3>Segmen</h3>
@@ -475,6 +484,40 @@ function renderMovementAnalysis(latestRows) {
   `;
 }
 
+function buildKpiMovementNarrative({ previousDate, latestDate, totalDelta, scoreDelta, currentPenalty, driver }) {
+  const dayCount = countBusinessDays(previousDate, latestDate);
+  const burdenDirection = totalDelta < 0
+    ? "terjadi penurunan beban total sebanyak"
+    : totalDelta > 0
+      ? "terjadi kenaikan beban total sebanyak"
+      : "beban total tidak berubah sebesar";
+  const penaltyDirection = scoreDelta > 0
+    ? "membaik"
+    : scoreDelta < 0
+      ? "memburuk"
+      : "tetap";
+  const driverDirection = driver?.delta < 0 ? "Penurunan" : driver?.delta > 0 ? "Kenaikan" : "Pergerakan";
+  const driverClass = driver?.delta < 0 ? "burden-down" : driver?.delta > 0 ? "burden-up" : "";
+  const driverText = driver
+    ? `${driverDirection} terbanyak ada di cabang <strong class="${driverClass}">${escapeHtml(driver.code)} - ${escapeHtml(driver.name)}</strong> dengan ${driver.delta < 0 ? "penurunan" : "kenaikan"} sebanyak <strong class="${driverClass}">${formatSigned(driver.delta)}</strong>.`
+    : "Belum ada cabang dominan yang terbaca pada filter ini.";
+  return `
+    Progres dari tanggal <strong>${escapeHtml(formatFullDate(previousDate))}</strong>
+    s.d. <strong>${escapeHtml(formatFullDate(latestDate))}</strong>
+    (<strong>${fmtNumber.format(dayCount)} hari kerja</strong>), ${burdenDirection}
+    <strong>${formatSigned(totalDelta)}</strong>, sehingga pengurang KPI ${penaltyDirection}
+    menjadi <strong>${formatSigned(currentPenalty)}</strong> (${formatSigned(scoreDelta)} poin menuju 0).
+    ${driverText}
+  `;
+}
+
+function pickKpiMovementDriver(items, totalDelta) {
+  if (!items.length) return null;
+  if (totalDelta < 0) return [...items].filter((item) => item.delta < 0).sort((a, b) => a.delta - b.delta)[0] ?? null;
+  if (totalDelta > 0) return [...items].filter((item) => item.delta > 0).sort((a, b) => b.delta - a.delta)[0] ?? null;
+  return [...items].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0] ?? null;
+}
+
 function movementBaseRows(latestRows) {
   return latestRows
     .filter((row) => readCode(row) !== "905")
@@ -494,6 +537,7 @@ function buildOfficeMovementRows(rows) {
       latest: rawInvalid(row),
       previous: previous ? rawInvalid(previous) : 0,
       delta: previous ? rawInvalid(row) - rawInvalid(previous) : rawInvalid(row),
+      value: displayValue(row),
       newDelta: previous ? newInvalid(row) - newInvalid(previous) : newInvalid(row),
       oldDelta: previous ? oldInvalid(row) - oldInvalid(previous) : oldInvalid(row),
       valueDelta: previous ? displayValue(row) - displayValue(previous) : displayValue(row),
@@ -874,6 +918,30 @@ function parseDate(value) {
   if (match) return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1])).getTime();
   const parsed = new Date(text).getTime();
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function formatFullDate(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (!match) return text;
+  return `${match[1].padStart(2, "0")}-${match[2].padStart(2, "0")}-${match[3]}`;
+}
+
+function countBusinessDays(startValue, endValue) {
+  const startTime = parseDate(startValue);
+  const endTime = parseDate(endValue);
+  if (!startTime || !endTime) return 0;
+  const start = new Date(Math.min(startTime, endTime));
+  const end = new Date(Math.max(startTime, endTime));
+  let count = 0;
+  const cursor = new Date(start);
+  cursor.setDate(cursor.getDate() + 1);
+  while (cursor <= end) {
+    const day = cursor.getDay();
+    if (day !== 0 && day !== 6) count += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return count;
 }
 
 function compareDateDesc(a, b) {
