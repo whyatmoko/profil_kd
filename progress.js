@@ -17,6 +17,13 @@ const metrics = [
   { key: "kel_pkbu", label: "Kelengkapan PKBU", burden: "beban_kel_pkbu", start: "awal_kel_pkbu", realization: "realisasi_kel_pkbu", percent: "persen_kel_pkbu", score: "nilai_kel_pkbu" },
 ];
 
+const tableComponentOptions = [
+  { key: "burden", label: "Sisa" },
+  { key: "progress", label: "+/-" },
+  { key: "percent", label: "%" },
+  { key: "score", label: "Score" },
+];
+
 const maxScores = {
   dup_na: { main: 5, kcp: 6 },
   kel_tk_aktif: { main: 9, kcp: 11 },
@@ -35,6 +42,8 @@ const state = {
   trendEnd: "",
   search: "",
   tableSort: { key: "nilai_total", direction: "desc" },
+  tableMetrics: [...metrics.map((metric) => metric.key), "nilai_total"],
+  tableComponents: ["burden", "progress", "percent", "score"],
 };
 
 const els = {
@@ -58,6 +67,12 @@ const els = {
   tableCapture: document.querySelector("#progressTableCapture"),
   tableHead: document.querySelector("#progressTableHead"),
   tableBody: document.querySelector("#progressTableBody"),
+  metricColumns: document.querySelector("#progressMetricColumns"),
+  metricColumnsButton: document.querySelector("#progressMetricColumnsButton"),
+  metricColumnsMenu: document.querySelector("#progressMetricColumnsMenu"),
+  componentColumns: document.querySelector("#progressComponentColumns"),
+  componentColumnsButton: document.querySelector("#progressComponentColumnsButton"),
+  componentColumnsMenu: document.querySelector("#progressComponentColumnsMenu"),
   parameterResumeSubtitle: document.querySelector("#parameterResumeSubtitle"),
   parameterResume: document.querySelector("#parameterResume"),
   copyParameterResume: document.querySelector("#copyParameterResume"),
@@ -196,8 +211,38 @@ function render() {
 
   renderIgiCards(activeOfficeRow, selectedMetrics);
   renderTrend(selectedMetrics);
+  renderTableColumnFilters();
   renderTable(igiForDate, selectedMetrics);
   renderParameterResume(igiForDate, selectedMetrics);
+}
+
+function renderTableColumnFilters() {
+  if (!els.metricColumnsMenu || !els.componentColumnsMenu) return;
+  const metricOptions = [
+    ...metrics.map((metric) => ({ key: metric.key, label: metric.label })),
+    { key: "nilai_total", label: "Nilai" },
+  ];
+  els.metricColumnsButton.textContent = tableSelectionLabel(state.tableMetrics, metricOptions.length, "Semua Parameter", "Parameter");
+  els.metricColumnsMenu.innerHTML = metricOptions.map((option) => `
+    <label class="check-option">
+      <input type="checkbox" value="${escapeHtml(option.key)}" ${state.tableMetrics.includes(option.key) ? "checked" : ""} />
+      <span>${escapeHtml(option.label)}</span>
+    </label>
+  `).join("");
+
+  els.componentColumnsButton.textContent = tableSelectionLabel(state.tableComponents, tableComponentOptions.length, "Semua Agregat", "Agregat");
+  els.componentColumnsMenu.innerHTML = tableComponentOptions.map((option) => `
+    <label class="check-option">
+      <input type="checkbox" value="${escapeHtml(option.key)}" ${state.tableComponents.includes(option.key) ? "checked" : ""} />
+      <span>${escapeHtml(option.label)}</span>
+    </label>
+  `).join("");
+}
+
+function tableSelectionLabel(selected, total, allLabel, partialLabel) {
+  if (selected.length >= total) return allLabel;
+  if (!selected.length) return `${partialLabel}: tidak ada`;
+  return `${partialLabel}: ${fmtNumber.format(selected.length)}`;
 }
 
 function renderIgiCards(row, selectedMetrics) {
@@ -812,18 +857,25 @@ function buildOpportunity(row, metric, previousRow = null) {
 
 function renderTable(rows, selectedMetrics) {
   const officeRows = filterProgressTableRows(rows);
+  const selectedMetricKeys = new Set(selectedMetrics.map((metric) => metric.key));
+  const visibleMetrics = metrics.filter((metric) => state.tableMetrics.includes(metric.key) && selectedMetricKeys.has(metric.key));
+  const showTotalColumn = state.tableMetrics.includes("nilai_total");
 
   const columns = [
     { key: "kode_kantor", label: "Kode Kantor", sortType: "text", sortValue: (row) => row.kode_kantor, value: (row) => row.kode_kantor },
     { key: "nama_kantor", label: "Nama Kantor", sortType: "text", sortValue: (row) => row.nama_kantor, value: (row) => row.nama_kantor },
-    ...selectedMetrics.map((metric) => (
-      { key: `burden_${metric.key}`, label: `Sisa ${metric.label}`, className: "metric-cell-wrap", html: true, sortType: "number", sortValue: (row) => parseNumber(row[metric.burden]), value: (row) => renderTableMetricTags(row, metric) }
+    ...visibleMetrics.map((metric) => (
+      { key: `burden_${metric.key}`, label: metric.label, className: "metric-cell-wrap", html: true, sortType: "number", sortValue: (row) => parseNumber(row[metric.burden]), value: (row) => renderTableMetricTags(row, metric) }
     )),
-    { key: "nilai_total", label: "Nilai Total", className: "metric-cell-wrap", html: true, sortType: "number", sortValue: (row) => parseNumber(row.nilai), value: (row) => renderTotalScoreChangeTag(row) },
+    ...(showTotalColumn ? [
+      { key: "nilai_total", label: "Nilai Total", className: "metric-cell-wrap", html: true, sortType: "number", sortValue: (row) => parseNumber(row.nilai), value: (row) => renderTotalScoreChangeTag(row) },
+    ] : []),
   ];
-  const sortOptions = buildProgressSortOptions(columns, selectedMetrics);
+  const sortOptions = buildProgressSortOptions(columns, visibleMetrics, showTotalColumn);
   if (!sortOptions.some((column) => column.key === state.tableSort.key)) {
-    state.tableSort = { key: "nilai_total", direction: "desc" };
+    state.tableSort = sortOptions.some((column) => column.key === "nilai_total")
+      ? { key: "nilai_total", direction: "desc" }
+      : { key: "kode_kantor", direction: "asc" };
   }
   const sortedRows = sortProgressTableRows(officeRows, sortOptions);
 
@@ -836,22 +888,22 @@ function renderTable(rows, selectedMetrics) {
     <tr class="component-sort-row">
       <th></th>
       <th></th>
-      ${selectedMetrics.map((metric) => `
+      ${visibleMetrics.map((metric) => `
         <th class="metric-cell-wrap">
           <div class="component-sort">
-            ${renderComponentSortButton(`burden_${metric.key}`, "Sisa")}
-            ${renderComponentSortButton(`progress_${metric.key}`, "+/-")}
-            ${renderComponentSortButton(`percent_${metric.key}`, "%")}
-            ${renderComponentSortButton(`score_${metric.key}`, "Score")}
+            ${state.tableComponents.includes("burden") ? renderComponentSortButton(`burden_${metric.key}`, "Sisa") : ""}
+            ${state.tableComponents.includes("progress") ? renderComponentSortButton(`progress_${metric.key}`, "+/-") : ""}
+            ${state.tableComponents.includes("percent") ? renderComponentSortButton(`percent_${metric.key}`, "%") : ""}
+            ${state.tableComponents.includes("score") ? renderComponentSortButton(`score_${metric.key}`, "Score") : ""}
           </div>
         </th>
       `).join("")}
-      <th class="metric-cell-wrap">
+      ${showTotalColumn ? `<th class="metric-cell-wrap">
         <div class="component-sort">
-          ${renderComponentSortButton("nilai_total", "Score")}
-          ${renderComponentSortButton("nilai_delta", "+/-")}
+          ${state.tableComponents.includes("score") ? renderComponentSortButton("nilai_total", "Score") : ""}
+          ${state.tableComponents.includes("progress") ? renderComponentSortButton("nilai_delta", "+/-") : ""}
         </div>
-      </th>
+      </th>` : ""}
     </tr>
   `;
   els.tableBody.innerHTML = sortedRows.map((row) => `
@@ -870,16 +922,16 @@ function filterProgressTableRows(rows) {
     .filter((row) => !state.search || `${row.kode_kantor} ${row.nama_kantor}`.toLowerCase().includes(state.search));
 }
 
-function buildProgressSortOptions(columns, selectedMetrics) {
+function buildProgressSortOptions(columns, selectedMetrics, showTotalColumn = true) {
   return [
     ...columns,
     ...selectedMetrics.flatMap((metric) => [
-      { key: `burden_${metric.key}`, sortType: "number", sortValue: (row) => parseNumber(row[metric.burden]) },
-      { key: `progress_${metric.key}`, sortType: "number", sortValue: (row) => getTableMetricProgress(row, metric) ?? 0 },
-      { key: `percent_${metric.key}`, sortType: "number", sortValue: (row) => parseNumber(row[metric.percent]) },
-      { key: `score_${metric.key}`, sortType: "number", sortValue: (row) => parseNumber(row[metric.score]) },
+      ...(state.tableComponents.includes("burden") ? [{ key: `burden_${metric.key}`, sortType: "number", sortValue: (row) => parseNumber(row[metric.burden]) }] : []),
+      ...(state.tableComponents.includes("progress") ? [{ key: `progress_${metric.key}`, sortType: "number", sortValue: (row) => getTableMetricProgress(row, metric) ?? 0 }] : []),
+      ...(state.tableComponents.includes("percent") ? [{ key: `percent_${metric.key}`, sortType: "number", sortValue: (row) => parseNumber(row[metric.percent]) }] : []),
+      ...(state.tableComponents.includes("score") ? [{ key: `score_${metric.key}`, sortType: "number", sortValue: (row) => parseNumber(row[metric.score]) }] : []),
     ]),
-    { key: "nilai_delta", sortType: "number", sortValue: (row) => getTotalScoreDelta(row) ?? 0 },
+    ...(showTotalColumn && state.tableComponents.includes("progress") ? [{ key: "nilai_delta", sortType: "number", sortValue: (row) => getTotalScoreDelta(row) ?? 0 }] : []),
   ];
 }
 
@@ -912,13 +964,16 @@ function renderTableMetricTags(row, metric) {
   const progressText = progress === null
     ? "-"
     : `${progress > 0 ? "+" : ""}${fmtNumber.format(progress)}`;
+  const tags = [
+    state.tableComponents.includes("burden") ? `<span class="tag plain">${fmtNumber.format(burden)}</span>` : "",
+    state.tableComponents.includes("progress") ? `<span class="tag ${progressClass}">${progressText}</span>` : "",
+    state.tableComponents.includes("percent") ? `<span class="tag percent" style="${getPercentTagStyle(percent)}">${fmtDecimal.format(percent)}%</span>` : "",
+    state.tableComponents.includes("score") ? `<span class="tag score" style="${getScoreCellStyle(parseNumber(row[metric.score]), getMaxScore(metric.key, row.kode_kantor)).replaceAll("score", "tag-score")}">${escapeHtml(formatRawScore(row[metric.score]))}</span>` : "",
+  ].filter(Boolean);
 
   return `
-    <div class="metric-tags">
-      <span class="tag plain">${fmtNumber.format(burden)}</span>
-      <span class="tag ${progressClass}">${progressText}</span>
-      <span class="tag percent" style="${getPercentTagStyle(percent)}">${fmtDecimal.format(percent)}%</span>
-      <span class="tag score" style="${getScoreCellStyle(parseNumber(row[metric.score]), getMaxScore(metric.key, row.kode_kantor)).replaceAll("score", "tag-score")}">${escapeHtml(formatRawScore(row[metric.score]))}</span>
+    <div class="metric-tags ${tags.length === 1 ? "single" : ""}">
+      ${tags.length ? tags.join("") : `<span class="tag neutral">-</span>`}
     </div>
   `;
 }
@@ -931,11 +986,22 @@ function getTableMetricProgress(row, metric) {
 
 function renderTotalScoreChangeTag(row) {
   const delta = getTotalScoreDelta(row);
+  const scoreTag = state.tableComponents.includes("score")
+    ? `<span class="tag plain">${formatNumber(row.nilai)}</span>`
+    : "";
   if (delta === null) {
-    return `<div class="metric-tags score-total"><span class="tag plain">${formatNumber(row.nilai)}</span><span class="tag neutral">-</span></div>`;
+    const tags = [
+      scoreTag,
+      state.tableComponents.includes("progress") ? `<span class="tag neutral">-</span>` : "",
+    ].filter(Boolean);
+    return `<div class="metric-tags score-total ${tags.length === 1 ? "single" : ""}">${tags.length ? tags.join("") : `<span class="tag neutral">-</span>`}</div>`;
   }
   const deltaClass = delta === 0 ? "neutral" : delta > 0 ? "good" : "bad";
-  return `<div class="metric-tags score-total"><span class="tag plain">${formatNumber(row.nilai)}</span><span class="tag ${deltaClass}">${delta > 0 ? "+" : ""}${fmtDecimal.format(delta)}</span></div>`;
+  const tags = [
+    scoreTag,
+    state.tableComponents.includes("progress") ? `<span class="tag ${deltaClass}">${delta > 0 ? "+" : ""}${fmtDecimal.format(delta)}</span>` : "",
+  ].filter(Boolean);
+  return `<div class="metric-tags score-total ${tags.length === 1 ? "single" : ""}">${tags.length ? tags.join("") : `<span class="tag neutral">-</span>`}</div>`;
 }
 
 function getTotalScoreDelta(row) {
@@ -1348,6 +1414,9 @@ function currentDateRows() {
 
 function downloadProgressTableCsv() {
   const selectedMetrics = currentSelectedMetrics();
+  const selectedMetricKeys = new Set(selectedMetrics.map((metric) => metric.key));
+  const visibleMetrics = metrics.filter((metric) => state.tableMetrics.includes(metric.key) && selectedMetricKeys.has(metric.key));
+  const showTotalColumn = state.tableMetrics.includes("nilai_total");
   const rows = filterProgressTableRows(currentDateRows());
   if (!rows.length) {
     showToast("Tidak ada tabel progress untuk didownload.");
@@ -1356,36 +1425,36 @@ function downloadProgressTableCsv() {
   const columnsForSort = [
     { key: "kode_kantor", sortType: "text", sortValue: (row) => row.kode_kantor },
     { key: "nama_kantor", sortType: "text", sortValue: (row) => row.nama_kantor },
-    ...selectedMetrics.map((metric) => ({ key: `burden_${metric.key}`, sortType: "number", sortValue: (row) => parseNumber(row[metric.burden]) })),
-    { key: "nilai_total", sortType: "number", sortValue: (row) => parseNumber(row.nilai) },
+    ...visibleMetrics.map((metric) => ({ key: `burden_${metric.key}`, sortType: "number", sortValue: (row) => parseNumber(row[metric.burden]) })),
+    ...(showTotalColumn ? [{ key: "nilai_total", sortType: "number", sortValue: (row) => parseNumber(row.nilai) }] : []),
   ];
-  const sortOptions = buildProgressSortOptions(columnsForSort, selectedMetrics);
+  const sortOptions = buildProgressSortOptions(columnsForSort, visibleMetrics, showTotalColumn);
   const sortedRows = sortProgressTableRows(rows, sortOptions);
   const columns = [
     "Kode Kantor",
     "Nama Kantor",
-    ...selectedMetrics.flatMap((metric) => [
-      `Sisa ${metric.label}`,
-      `Progress ${metric.label}`,
-      `% ${metric.label}`,
-      `Score ${metric.label}`,
+    ...visibleMetrics.flatMap((metric) => [
+      ...(state.tableComponents.includes("burden") ? [`Sisa ${metric.label}`] : []),
+      ...(state.tableComponents.includes("progress") ? [`Progress ${metric.label}`] : []),
+      ...(state.tableComponents.includes("percent") ? [`% ${metric.label}`] : []),
+      ...(state.tableComponents.includes("score") ? [`Score ${metric.label}`] : []),
     ]),
-    "Nilai Total",
-    "Progress Nilai Total",
+    ...(showTotalColumn && state.tableComponents.includes("score") ? ["Nilai Total"] : []),
+    ...(showTotalColumn && state.tableComponents.includes("progress") ? ["Progress Nilai Total"] : []),
   ];
   const csv = [
     columns.map(csvEscape).join(","),
     ...sortedRows.map((row) => [
       row.kode_kantor,
       row.nama_kantor,
-      ...selectedMetrics.flatMap((metric) => [
-        parseNumber(row[metric.burden]),
-        getTableMetricProgress(row, metric) ?? "",
-        row[metric.percent],
-        formatRawScore(row[metric.score]),
+      ...visibleMetrics.flatMap((metric) => [
+        ...(state.tableComponents.includes("burden") ? [parseNumber(row[metric.burden])] : []),
+        ...(state.tableComponents.includes("progress") ? [getTableMetricProgress(row, metric) ?? ""] : []),
+        ...(state.tableComponents.includes("percent") ? [row[metric.percent]] : []),
+        ...(state.tableComponents.includes("score") ? [formatRawScore(row[metric.score])] : []),
       ]),
-      formatRawScore(row.nilai),
-      getTotalScoreDelta(row) ?? "",
+      ...(showTotalColumn && state.tableComponents.includes("score") ? [formatRawScore(row.nilai)] : []),
+      ...(showTotalColumn && state.tableComponents.includes("progress") ? [getTotalScoreDelta(row) ?? ""] : []),
     ].map(csvEscape).join(",")),
   ].join("\r\n");
 
@@ -1668,6 +1737,36 @@ els.resetFilters.addEventListener("click", () => {
 els.searchInput.addEventListener("input", (event) => {
   state.search = event.target.value.trim().toLowerCase();
   render();
+});
+els.metricColumnsButton?.addEventListener("click", () => {
+  els.metricColumnsMenu.hidden = !els.metricColumnsMenu.hidden;
+  if (els.componentColumnsMenu) els.componentColumnsMenu.hidden = true;
+});
+els.componentColumnsButton?.addEventListener("click", () => {
+  els.componentColumnsMenu.hidden = !els.componentColumnsMenu.hidden;
+  if (els.metricColumnsMenu) els.metricColumnsMenu.hidden = true;
+});
+els.metricColumnsMenu?.addEventListener("change", (event) => {
+  if (event.target.type !== "checkbox") return;
+  const value = event.target.value;
+  state.tableMetrics = event.target.checked
+    ? [...new Set([...state.tableMetrics, value])]
+    : state.tableMetrics.filter((item) => item !== value);
+  render();
+  els.metricColumnsMenu.hidden = false;
+});
+els.componentColumnsMenu?.addEventListener("change", (event) => {
+  if (event.target.type !== "checkbox") return;
+  const value = event.target.value;
+  state.tableComponents = event.target.checked
+    ? [...new Set([...state.tableComponents, value])]
+    : state.tableComponents.filter((item) => item !== value);
+  render();
+  els.componentColumnsMenu.hidden = false;
+});
+document.addEventListener("click", (event) => {
+  if (els.metricColumns && !els.metricColumns.contains(event.target)) els.metricColumnsMenu.hidden = true;
+  if (els.componentColumns && !els.componentColumns.contains(event.target)) els.componentColumnsMenu.hidden = true;
 });
 els.tableHead.addEventListener("click", (event) => {
   const button = event.target.closest("[data-sort-key]");
