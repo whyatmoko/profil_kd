@@ -4,10 +4,10 @@ const FOCUS_WILAYAH = "905";
 
 const wilayahMetrics = [
   { key: "nilai", label: "Total Score", field: "Total Bobot" },
-  { key: "dup_na", label: "DUP NA", field: "Bobot Duplikasi TK Non Aktif", burden: "Sisa Duplikasi TK Non Aktif" },
-  { key: "kel_tk_aktif", label: "Kelengkapan TK Aktif", field: "Bobot Kelengkapan TK Aktif", burden: "Sisa Kelengkapan TK Aktif" },
-  { key: "kel_tk_na", label: "Kelengkapan TK NA", field: "Bobot Kelengkapan TK Non Aktif", burden: "Sisa Kelengkapan TK Non Aktif" },
-  { key: "kel_pkbu", label: "Kelengkapan PKBU", field: "Bobot Kelengkapan PKBU", burden: "Sisa Kelengkapan PKBU" },
+  { key: "dup_na", label: "DUP NA", field: "Bobot Duplikasi TK Non Aktif", burden: "Sisa Duplikasi TK Non Aktif", initial: "Duplikasi TK Non Aktif Awal", maxMain: 5, maxKcp: 6 },
+  { key: "kel_tk_aktif", label: "Kelengkapan TK Aktif", field: "Bobot Kelengkapan TK Aktif", burden: "Sisa Kelengkapan TK Aktif", initial: "Kelengkapan TK Aktif Awal", maxMain: 9, maxKcp: 11 },
+  { key: "kel_tk_na", label: "Kelengkapan TK NA", field: "Bobot Kelengkapan TK Non Aktif", burden: "Sisa Kelengkapan TK Non Aktif", initial: "Kelengkapan TK Non Aktif Awal", maxMain: 4, maxKcp: 5 },
+  { key: "kel_pkbu", label: "Kelengkapan PKBU", field: "Bobot Kelengkapan PKBU", burden: "Sisa Kelengkapan PKBU", initial: "Kelengkapan PKBU Awal", maxMain: 2, maxKcp: 3 },
 ];
 
 const wilayahState = {
@@ -143,6 +143,7 @@ function buildOfficeSnapshots(rows) {
         name: String(readField(row, "Nama Kantor") ?? "").trim() || code,
         scores: Object.fromEntries(wilayahMetrics.map((metric) => [metric.key, parseNumber(readField(row, metric.field))])),
         burdens: Object.fromEntries(wilayahMetrics.filter((metric) => metric.burden).map((metric) => [metric.key, parseNumber(readField(row, metric.burden))])),
+        initials: Object.fromEntries(wilayahMetrics.filter((metric) => metric.initial).map((metric) => [metric.key, parseNumber(readField(row, metric.initial))])),
       };
     })
     .sort((a, b) => parseDate(a.date) - parseDate(b.date) || a.code.localeCompare(b.code, "id", { numeric: true }));
@@ -472,10 +473,40 @@ function renderFocusMetricGapBadge(row, metric, rows) {
   const target = focusComparisonTarget(row, rows);
   if (!target) return "";
   const gap = metricValue(row, metric) - metricValue(target, metric);
+  if (metric.burden) {
+    const converted = estimateBurdenEquivalentForScore(row, metric, Math.abs(gap));
+    const amount = Number.isFinite(converted) ? wilayahFmtNumber.format(converted) : formatSignedDecimal(Math.abs(gap));
+    const suffix = Number.isFinite(converted) ? " beban" : "";
+    const text = gap >= 0 ? `Unggul ${amount}${suffix}` : `Butuh ${amount}${suffix}`;
+    return `<em class="metric-gap-badge ${gap >= 0 ? "ahead" : "need"}">${escapeHtml(text)}</em>`;
+  }
   const text = gap >= 0
     ? `Unggul ${formatSignedDecimal(gap)}`
     : `Butuh ${formatSignedDecimal(Math.abs(gap))}`;
   return `<em class="metric-gap-badge ${gap >= 0 ? "ahead" : "need"}">${escapeHtml(text)}</em>`;
+}
+
+function estimateBurdenEquivalentForScore(row, metric, scoreGap) {
+  const maxScore = maxScoreForOffice(row.code, metric);
+  if (!maxScore || !scoreGap) return null;
+  let initial = parseNumber(row.initials?.[metric.key]);
+  const burden = parseNumber(row.burdens?.[metric.key]);
+  if (!initial) {
+    const currentScore = metricValue(row, metric);
+    const unresolvedRatio = 1 - currentScore / maxScore;
+    initial = unresolvedRatio > 0 ? burden / unresolvedRatio : 0;
+  }
+  if (!initial) return null;
+  const scorePerBurden = maxScore / initial;
+  if (!scorePerBurden) return null;
+  return Math.max(0, Math.ceil(scoreGap / scorePerBurden));
+}
+
+function maxScoreForOffice(code, metric) {
+  const officeNumber = branchNumber(code);
+  return officeNumber >= 12 && officeNumber <= 34
+    ? parseNumber(metric.maxKcp)
+    : parseNumber(metric.maxMain);
 }
 
 function renderRankMetricCell(row, metric) {

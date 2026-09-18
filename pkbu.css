@@ -1624,13 +1624,13 @@ th {
 }
 
 .metric-gap-badge.ahead {
-  background: #e0f2fe;
-  color: #0369a1;
+  background: #dcfce7;
+  color: #047857;
 }
 
 .metric-gap-badge.need {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: #fee2e2;
+  color: #b42318;
 }
 
 .daily-metric {
