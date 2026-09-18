@@ -35,14 +35,14 @@ const wilayahEls = {
   insightSubtitle: document.querySelector("#wilayahInsightSubtitle"),
   insight: document.querySelector("#wilayahInsight"),
   dailySubtitle: document.querySelector("#wilayahDailySubtitle"),
-  dailyDownloadJpg: document.querySelector("#downloadDailyJpg"),
+  dailyPrintPdf: document.querySelector("#printDailyPdf"),
   dailyHead: document.querySelector("#wilayahDailyHead"),
   dailyBody: document.querySelector("#wilayahDailyBody"),
   rankSubtitle: document.querySelector("#wilayahRankSubtitle"),
   rankHead: document.querySelector("#wilayahRankHead"),
   rankBody: document.querySelector("#wilayahRankBody"),
   branchSubtitle: document.querySelector("#wilayahBranchSubtitle"),
-  branchDownloadJpg: document.querySelector("#downloadBranchJpg"),
+  branchPrintPdf: document.querySelector("#printBranchPdf"),
   branchCategoryFilter: document.querySelector("#wilayahBranchCategoryFilter"),
   branchHead: document.querySelector("#wilayahBranchHead"),
   branchBody: document.querySelector("#wilayahBranchBody"),
@@ -430,10 +430,52 @@ function renderDailyComparison(focus, competitors) {
   }
   wilayahEls.dailyBody.innerHTML = comparisonRows.map((row) => `
     <tr class="${row.code === FOCUS_WILAYAH ? "focus-row" : ""}">
-      <td><strong>${escapeHtml(row.code)}</strong> - ${escapeHtml(row.name)}</td>
-      ${wilayahMetrics.map((metric) => renderDailyMetricCell(row, metric)).join("")}
+      <td>${renderDailyOfficeLabel(row, comparisonRows)}</td>
+      ${wilayahMetrics.map((metric) => renderDailyMetricCell(row, metric, comparisonRows)).join("")}
     </tr>
   `).join("");
+}
+
+function renderDailyOfficeLabel(row, rows) {
+  const label = `<strong>${escapeHtml(row.code)}</strong> - ${escapeHtml(row.name)}`;
+  if (row.code !== FOCUS_WILAYAH) return label;
+  return `
+    <div class="focus-office-label">
+      <span>${label}</span>
+      ${renderFocusGapBadge(row, rows)}
+    </div>
+  `;
+}
+
+function renderFocusGapBadge(row, rows) {
+  const target = focusComparisonTarget(row, rows);
+  if (!target) return "";
+  const gap = metricValue(row, wilayahMetrics[0]) - metricValue(target, wilayahMetrics[0]);
+  const text = gap >= 0
+    ? `Unggul ${formatSignedDecimal(gap)} dari ${target.code}`
+    : `Butuh ${formatSignedDecimal(Math.abs(gap))} susul ${target.code}`;
+  return `<em class="focus-gap-badge">${escapeHtml(text)}</em>`;
+}
+
+function focusComparisonTarget(row, rows) {
+  const sorted = rows
+    .filter(Boolean)
+    .slice()
+    .sort((a, b) => metricValue(b, wilayahMetrics[0]) - metricValue(a, wilayahMetrics[0]) || a.code.localeCompare(b.code, "id", { numeric: true }));
+  const index = sorted.findIndex((item) => item.code === FOCUS_WILAYAH);
+  if (index < 0) return null;
+  return sorted[index + 1] ?? sorted[index - 1] ?? null;
+}
+
+function renderFocusMetricGapBadge(row, metric, rows) {
+  if (row.code !== FOCUS_WILAYAH || !rows?.length) return "";
+  const target = focusComparisonTarget(row, rows);
+  if (!target) return "";
+  const gap = metricValue(row, metric) - metricValue(target, metric);
+  const text = gap >= 0
+    ? `Unggul ${formatSignedDecimal(gap)}`
+    : `Butuh ${formatSignedDecimal(Math.abs(gap))}`;
+  return `<em class="metric-gap-badge ${gap >= 0 ? "ahead" : "need"}">${escapeHtml(text)}</em>`;
 }
 
 function renderRankMetricCell(row, metric) {
@@ -453,7 +495,7 @@ function renderRankMetricCell(row, metric) {
   return renderDailyMetricCell(row, metric);
 }
 
-function renderDailyMetricCell(row, metric) {
+function renderDailyMetricCell(row, metric, comparisonRows = null) {
   const value = metricValue(row, metric);
   const delta = scoreDelta(row.code, metric.key, row.date);
   const tone = delta === null || Math.abs(delta) < 0.005 ? "neutral" : delta > 0 ? "good" : "bad";
@@ -463,19 +505,25 @@ function renderDailyMetricCell(row, metric) {
     const burden = parseNumber(row.burdens[metric.key]);
     return `
       <td class="num">
-        <div class="daily-metric stacked">
-          <div><strong>${wilayahFmtNumber.format(burden)}</strong></div>
-          <div><strong>${wilayahFmtDecimal.format(value)}</strong></div>
-          <div><em class="tag ${burdenTone}">${burdenMove === null ? "-" : formatSignedNumber(burdenMove)}</em></div>
+        <div class="daily-cell-stack">
+          <div class="daily-metric stacked">
+            <div><strong>${wilayahFmtNumber.format(burden)}</strong></div>
+            <div><strong>${wilayahFmtDecimal.format(value)}</strong></div>
+            <div><em class="tag ${burdenTone}">${burdenMove === null ? "-" : formatSignedNumber(burdenMove)}</em></div>
+          </div>
+          ${renderFocusMetricGapBadge(row, metric, comparisonRows)}
         </div>
       </td>
     `;
   }
   return `
     <td class="num">
-      <div class="daily-metric">
-        <strong>${wilayahFmtDecimal.format(value)}</strong>
-        <span class="tag ${tone}">${delta === null ? "-" : formatSignedDecimal(delta)}</span>
+      <div class="daily-cell-stack">
+        <div class="daily-metric">
+          <strong>${wilayahFmtDecimal.format(value)}</strong>
+          <span class="tag ${tone}">${delta === null ? "-" : formatSignedDecimal(delta)}</span>
+        </div>
+        ${renderFocusMetricGapBadge(row, metric, comparisonRows)}
       </div>
     </td>
   `;
@@ -544,6 +592,10 @@ function latestBranchRows() {
 
 function latestDateValue() {
   return uniqueValues(wilayahState.snapshots, "date").sort((a, b) => parseDate(a) - parseDate(b)).at(-1) ?? "";
+}
+
+function firstDateValue() {
+  return uniqueValues(wilayahState.snapshots, "date").sort((a, b) => parseDate(a) - parseDate(b))[0] ?? "";
 }
 
 function latestBranchDateValue() {
@@ -776,86 +828,58 @@ function showWilayahToast(message) {
   }, 3600);
 }
 
-async function downloadTableAsJpg(tableSelector, title, filenamePrefix) {
+function printTableAsPdf(tableSelector, title) {
   const target = document.querySelector(tableSelector);
   const table = target?.tagName === "TABLE" ? target : target?.closest("table");
   if (!table || table.querySelectorAll("tr").length <= 1) {
-    showWilayahToast("Tabel belum tersedia untuk didownload.");
+    showWilayahToast("Tabel belum tersedia untuk dicetak.");
     return;
   }
-
-  try {
-    const padding = 10;
-    const clone = table.cloneNode(true);
-    inlineComputedStyles(table, clone);
-    clone.style.margin = "0";
-    clone.style.width = `${Math.ceil(table.scrollWidth || table.getBoundingClientRect().width)}px`;
-    clone.style.background = "#ffffff";
-
-    const shell = document.createElement("div");
-    shell.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-    shell.style.display = "inline-block";
-    shell.style.padding = `${padding}px`;
-    shell.style.background = "#ffffff";
-    shell.style.color = "#10213f";
-    shell.style.fontFamily = "Inter, Arial, sans-serif";
-    shell.appendChild(clone);
-    document.body.appendChild(shell);
-    shell.style.position = "fixed";
-    shell.style.left = "-100000px";
-    shell.style.top = "0";
-
-    const width = Math.ceil(shell.scrollWidth);
-    const height = Math.ceil(shell.scrollHeight);
-    const serialized = new XMLSerializer().serializeToString(shell);
-    shell.remove();
-
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-        <foreignObject width="100%" height="100%">${serialized}</foreignObject>
-      </svg>
-    `;
-    const image = new Image();
-    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-    await new Promise((resolve, reject) => {
-      image.onload = resolve;
-      image.onerror = reject;
-      image.src = url;
-    });
-    const canvas = document.createElement("canvas");
-    const scale = 2;
-    canvas.width = width * scale;
-    canvas.height = height * scale;
-    const context = canvas.getContext("2d");
-    context.scale(scale, scale);
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, width, height);
-    context.drawImage(image, 0, 0, width, height);
-    URL.revokeObjectURL(url);
-
-    const link = document.createElement("a");
-    link.href = canvas.toDataURL("image/jpeg", 0.94);
-    link.download = `${filenamePrefix}-${latestDateValue() || "update"}.jpg`;
-    link.click();
-    showWilayahToast("Tabel berhasil dicapture sebagai JPG.");
-  } catch (error) {
-    showWilayahToast(`Gagal capture tabel: ${error.message}`);
+  const printWindow = window.open("", "_blank", "width=1200,height=800");
+  if (!printWindow) {
+    showWilayahToast("Popup print diblokir browser.");
+    return;
   }
-}
-
-function inlineComputedStyles(source, clone) {
-  const sourceElements = [source, ...source.querySelectorAll("*")];
-  const cloneElements = [clone, ...clone.querySelectorAll("*")];
-  sourceElements.forEach((element, index) => {
-    const target = cloneElements[index];
-    if (!target) return;
-    const computed = getComputedStyle(element);
-    target.style.cssText = computed.cssText;
-    if (target.tagName === "BUTTON") {
-      target.style.minWidth = computed.minWidth;
-      target.style.minHeight = computed.minHeight;
-    }
-  });
+  const styles = [...document.querySelectorAll("style, link[rel='stylesheet']")]
+    .map((node) => node.outerHTML)
+    .join("\n");
+  const tableHtml = table.outerHTML;
+  const latestDate = latestDateValue();
+  const previousDate = previousDateValue(latestDate) || latestDate;
+  const periodText = `Periode update ${formatFullDate(previousDate)} s.d. ${formatFullDate(latestDate)}`;
+  printWindow.document.write(`
+    <!doctype html>
+    <html lang="id">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        ${styles}
+        <style>
+          @page { size: A4 landscape; margin: 10mm; }
+          body { background: #ffffff !important; padding: 0; }
+          .print-shell { width: 100%; }
+          h1 { margin: 0 0 8px; color: #10213f; font-size: 16px; }
+          .print-period { margin: 0 0 12px; color: #5f6f86; font-size: 11px; font-weight: 800; }
+          table { width: 100%; min-width: 0 !important; }
+          th { position: static !important; }
+          .sub-sort-btn { border: 0 !important; background: transparent !important; padding: 0 !important; min-width: 0 !important; min-height: 0 !important; }
+          button { min-width: 0 !important; min-height: 0 !important; }
+        </style>
+      </head>
+      <body>
+        <main class="print-shell">
+          <h1>${escapeHtml(title)}</h1>
+          <p class="print-period">${escapeHtml(periodText)}</p>
+          ${tableHtml}
+        </main>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  printWindow.focus();
+  window.setTimeout(() => {
+    printWindow.print();
+  }, 350);
 }
 
 wilayahEls.metricFilter?.addEventListener("change", (event) => {
@@ -883,12 +907,12 @@ wilayahEls.competitorOptions?.addEventListener("change", (event) => {
   renderWilayahPage();
 });
 
-wilayahEls.dailyDownloadJpg?.addEventListener("click", () => {
-  downloadTableAsJpg(".wilayah-daily-wrap table", "Perbandingan Progres Harian", "perbandingan-progres-wilayah");
+wilayahEls.dailyPrintPdf?.addEventListener("click", () => {
+  printTableAsPdf(".wilayah-daily-wrap table", "Perbandingan Progres Harian");
 });
 
-wilayahEls.branchDownloadJpg?.addEventListener("click", () => {
-  downloadTableAsJpg("#wilayahBranchHead", "Progress Cabang Jateng DIY", "progress-cabang-jateng-diy");
+wilayahEls.branchPrintPdf?.addEventListener("click", () => {
+  printTableAsPdf("#wilayahBranchHead", "Progress Cabang Jateng DIY");
 });
 
 document.addEventListener("click", (event) => {
